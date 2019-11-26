@@ -1,0 +1,19 @@
+{"i": ["llvm -target=aarch64-linux-gnu", "topi_nn_conv2d", [["TENSOR", [1, 3, 224, 224], "float32"], ["TENSOR", [64, 3, 3, 3], "float32"], [1, 1], [1, 1], [1, 1], "NCHW", "float32"], {}, ["conv2d", [1, 3, 224, 224, "float32"], [64, 3, 3, 3, "float32"], [1, 1], [1, 1], [1, 1], "NCHW", "float32"], {"i": 188, "t": "direct", "c": null, "e": [["tile_ic", "sp", [-1, 1]], ["tile_oc", "sp", [-1, 8]], ["tile_ow", "sp", [-1, 7]], ["unroll_kw", "ot", false]]}], "r": [[0.0068607077727272725], 0, 0.9828505516052246, 1574768454.3438787], "v": 0.1}
+
+Extrack tasks...
+Tuning...
+[Task  1/ 1]  Current/Best:    8.07/  25.83 GFLOPS | Progress: (280/280) | 288.21 s Done.
+Compile...
+Run...
+Set_input("data")
+Set_input(**param)
+p0
+p7
+p3
+p5
+p1
+p6
+p2
+p4
+Evaluate inference time cost...
+Mean inference time (std dev): 16.94 ms (0.21 ms)

@@ -78,7 +78,7 @@ tuning_option = {
     'log_filename': log_file,
 
     'tuner': 'xgb',
-    'n_trial': 300,
+    'n_trial': 10,
     'early_stopping': 600,
 
     'measure_option': autotvm.measure_option(
@@ -94,7 +94,7 @@ tuning_option = {
 def tune_tasks(tasks,
               measure_option,
               tuner='xgb',
-              n_trial=300,
+              n_trial=10,
               early_stopping=None,
               log_filename='tuning.log',
               use_transfer_learning=True,
@@ -188,6 +188,9 @@ def main():
             print("Evaluate inference time cost...")
             ftimer = module.module.time_evaluator("run", ctx, number=1, repeat=600)
             prof_res = np.array(ftimer().results) * 1000
+            #print(ftimer().results)
+            tmp = sorted(ftimer().results)
+            print(tmp[0])
             print("Mean inference time (std dev): %.2f ms (%.2f ms)" %(np.mean(prof_res), np.std(prof_res)))
 
 if __name__ == "__main__":
