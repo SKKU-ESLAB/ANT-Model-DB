@@ -1,0 +1,27 @@
+{"i": ["cuda -model=unknown", "topi_nn_conv2d", [["TENSOR", [1, 3, 224, 224], "float32"], ["TENSOR", [20, 3, 5, 5], "float32"], [1, 1], [0, 0], [1, 1], "NCHW", "float32"], {}, ["conv2d", [1, 3, 224, 224, "float32"], [20, 3, 5, 5, "float32"], [1, 1], [0, 0], [1, 1], "NCHW", "float32"], {"i": 39206545, "t": "direct", "c": null, "e": [["tile_f", "sp", [-1, 2, 5, 2]], ["tile_y", "sp", [-1, 5, 1, 1]], ["tile_x", "sp", [-1, 1, 44, 1]], ["tile_rc", "sp", [-1, 1]], ["tile_ry", "sp", [-1, 5]], ["tile_rx", "sp", [-1, 5]], ["auto_unroll_max_step", "ot", 512], ["unroll_explicit", "ot", 1]]}], "r": [[0.00048448429795918367], 0, 2.2027437686920166, 1574772076.8755014], "v": 0.1}
+{"i": ["cuda -model=unknown", "topi_nn_conv2d", [["TENSOR", [1, 20, 110, 110], "float32"], ["TENSOR", [50, 20, 5, 5], "float32"], [1, 1], [0, 0], [1, 1], "NCHW", "float32"], {}, ["conv2d", [1, 20, 110, 110, "float32"], [50, 20, 5, 5, "float32"], [1, 1], [0, 0], [1, 1], "NCHW", "float32"], {"i": 823438, "t": "direct", "c": null, "e": [["tile_f", "sp", [-1, 1, 2, 25]], ["tile_y", "sp", [-1, 1, 1, 2]], ["tile_x", "sp", [-1, 1, 53, 1]], ["tile_rc", "sp", [-1, 4]], ["tile_ry", "sp", [-1, 5]], ["tile_rx", "sp", [-1, 1]], ["auto_unroll_max_step", "ot", 0], ["unroll_explicit", "ot", 1]]}], "r": [[0.0029559889019607844], 0, 4.540454149246216, 1574773209.0774555], "v": 0.1}
+{"i": ["cuda -model=unknown", "topi_nn_dense", [["TENSOR", [1, 140450], "float32"], ["TENSOR", [500, 140450], "float32"], null, "float32"], {}, ["dense", [1, 140450, "float32"], [500, 140450, "float32"], 0, "float32"], {"i": 4, "t": "direct", "c": null, "e": [["tile_k", "sp", [-1, 25]]]}], "r": [[0.012649595833333332], 0, 5.387704610824585, 1574773505.2199209], "v": 0.1}
+{"i": ["cuda -model=unknown", "topi_nn_dense", [["TENSOR", [1, 500], "float32"], ["TENSOR", [10, 500], "float32"], null, "float32"], {}, ["dense", [1, 500, "float32"], [10, 500, "float32"], 0, "float32"], {"i": 10, "t": "direct", "c": null, "e": [["tile_k", "sp", [-1, 250]]]}], "r": [[1.8015379236912154e-05], 0, 5.14716911315918, 1574773519.6907172], "v": 0.1}
+
+Extrack tasks...
+Tuning...
+[Task  1/ 4]  Current/Best:  242.40/ 299.70 GFLOPS | Progress: (300/300) | 761.15 s Done.
+[Task  2/ 4]  Current/Best:   73.96/ 190.05 GFLOPS | Progress: (300/300) | 1228.63 s Done.
+[Task  3/ 4]  Current/Best:    8.92/  11.10 GFLOPS | Progress: (18/18) | 13.93 s Done.
+[Task  4/ 4]  Current/Best:    0.54/   0.56 GFLOPS | Progress: (12/12) | 14.42 s Done.
+Compile...
+Run...
+Set_input("data")
+Set_input(**param)
+p4
+p2
+p6
+p0
+p5
+p3
+p1
+p7
+Evaluate inference time cost...
+0.142385304
+Mean inference time (std dev): 147.30 ms (5.52 ms)
+
