@@ -14,6 +14,7 @@ from PIL import Image
 from time import sleep
 #from tvm.contrib import ndk
 
+eps = 1e-3
 
 def conv_3x3(net, in_channles, out_channels, prefix, activation=True):
     weight = relay.var(prefix + "_weight")
@@ -22,6 +23,13 @@ def conv_3x3(net, in_channles, out_channels, prefix, activation=True):
     # Bias add
     bias = relay.var(prefix + "_bias")
     net = relay.nn.bias_add(net, bias)
+
+    base_name = prefix + "_bn"
+    gamma = relay.var(base_name + "_gamma")
+    beta = relay.var(base_name + "_beta")
+    mean = relay.var(base_name + "_mean")
+    var = relay.var(base_name + "_var")
+    net = relay.nn.batch_norm(net, gamma=gamma, beta=beta, moving_mean=mean, moving_var=var, axis=1, epsilon=eps)[0]
 
     # ReLU
     if activation:
@@ -54,10 +62,10 @@ def get_workload(batch_size=1,
                   **kwargs)
     return create_workload(net)
 
-#target = tvm.target.cuda()
+target = tvm.target.cuda()
 target_host = 'llvm -target=aarch64-linux-gnu'
-target = tvm.target.cuda("-model=tx2")
-#target_host = tvm.target.create('llvm -target=aarch64-linux-gnu')
+#target = tvm.target.cuda("-model=tx2")
+#target = tvm.target.create('llvm -target=aarch64-linux-gnu')
 
 
 network = 'sample'
@@ -70,7 +78,7 @@ tuning_option = {
     'log_filename': log_file,
 
     'tuner': 'xgb',
-    'n_trial': 1000,
+    'n_trial': 10,
     'early_stopping': 600,
 
     'measure_option': autotvm.measure_option(
@@ -78,7 +86,7 @@ tuning_option = {
         #runner=autotvm.LocalRunner(number=20, repeat=3, timeout=4, min_repeat_ms=150),
         runner=autotvm.RPCRunner(
             device_key,  # change the device key to your key
-            '0.0.0.0', 9190,
+            '0.0.0.0', 9192,
             number=5, repeat=3, timeout=100, min_repeat_ms=150)
     ),
 }
@@ -86,7 +94,7 @@ tuning_option = {
 def tune_tasks(tasks,
               measure_option,
               tuner='xgb',
-              n_trial=1000,
+              n_trial=10,
               early_stopping=None,
               log_filename='tuning.log',
               use_transfer_learning=True,
@@ -156,13 +164,13 @@ def main():
     with autotvm.apply_history_best(log_file):
         print("Compile...")
         with relay.build_config(opt_level=1):
-            graph, lib, params = relay.build_module.build(mod, target=target, params=params)
+            graph, lib, params = relay.build_module.build(mod, target=target, params=params, target_host=target_host)
 
             tmp = tempdir()
             filename = "net.tar"
             lib.export_library(tmp.relpath(filename))
 
-            remote = autotvm.measure.request_remote(device_key, '0.0.0.0', 9190, timeout=10000)
+            remote = autotvm.measure.request_remote(device_key, '0.0.0.0', 9192, timeout=10000)
             remote.upload(tmp.relpath(filename))
             rlib = remote.load_module(filename)
 
