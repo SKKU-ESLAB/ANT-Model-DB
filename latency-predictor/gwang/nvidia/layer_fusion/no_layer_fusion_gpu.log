@@ -1,8 +1,8 @@
-{"i": ["cuda -model=unknown", "topi_nn_conv2d", [["TENSOR", [1, 3, 224, 224], "float32"], ["TENSOR", [64, 3, 3, 3], "float32"], [1, 1], [1, 1], [1, 1], "NCHW", "float32"], {}, ["conv2d", [1, 3, 224, 224, "float32"], [64, 3, 3, 3, "float32"], [1, 1], [1, 1], [1, 1], "NCHW", "float32"], {"i": 43057208, "t": "direct", "c": null, "e": [["tile_f", "sp", [-1, 1, 2, 8]], ["tile_y", "sp", [-1, 1, 2, 2]], ["tile_x", "sp", [-1, 2, 16, 1]], ["tile_rc", "sp", [-1, 1]], ["tile_ry", "sp", [-1, 3]], ["tile_rx", "sp", [-1, 1]], ["auto_unroll_max_step", "ot", 512], ["unroll_explicit", "ot", 0]]}], "r": [[0.0006551569835616439], 0, 8.140912294387817, 1574764984.5020509], "v": 0.1}
+{"i": ["llvm -target=aarch64-linux-gnu", "topi_nn_conv2d", [["TENSOR", [1, 3, 224, 224], "float32"], ["TENSOR", [64, 3, 3, 3], "float32"], [1, 1], [1, 1], [1, 1], "NCHW", "float32"], {}, ["conv2d", [1, 3, 224, 224, "float32"], [64, 3, 3, 3, "float32"], [1, 1], [1, 1], [1, 1], "NCHW", "float32"], {"i": 214, "t": "direct", "c": null, "e": [["tile_ic", "sp", [-1, 1]], ["tile_oc", "sp", [-1, 4]], ["tile_ow", "sp", [-1, 14]], ["unroll_kw", "ot", false]]}], "r": [[0.006754678869565218], 0, 4.41358208656311, 1574765987.428421], "v": 0.1}
 
 Extrack tasks...
 Tuning...
-[Task  1/ 1]  Current/Best:  125.96/ 264.68 GFLOPS | Progress: (300/300) | 741.69 s Done.
+[Task  1/ 1]  Current/Best:    8.07/  25.83 GFLOPS | Progress: (280/280) | 288.21 s Done.
 Compile...
 Run...
 Set_input("data")
@@ -16,4 +16,4 @@ p6
 p2
 p4
 Evaluate inference time cost...
-Mean inference time (std dev): 3.97 ms (0.05 ms)
+Mean inference time (std dev): 16.94 ms (0.21 ms)

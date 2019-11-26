@@ -62,10 +62,10 @@ def get_workload(batch_size=1,
                   **kwargs)
     return create_workload(net)
 
-target = tvm.target.cuda()
+#target = tvm.target.cuda()
 target_host = 'llvm -target=aarch64-linux-gnu'
 #target = tvm.target.cuda("-model=tx2")
-#target = tvm.target.create('llvm -target=aarch64-linux-gnu')
+target = tvm.target.create('llvm -target=aarch64-linux-gnu')
 
 
 network = 'sample'
