@@ -16,6 +16,9 @@ This project is implemented based on TVM
 * CUDNN [Download Page][CUDNN]
 * CUDA
 
+## License
+Latency-Predictor is open source software under the Apache 2.0 license. 
+
 [tvm]:https://github.com/apache/incubator-tvm
 [llvm]:http://releases.llvm.org/download.html
 [CUDNN]:https://developer.nvidia.com/cudnn
