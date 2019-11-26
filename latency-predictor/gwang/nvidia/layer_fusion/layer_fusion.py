@@ -78,7 +78,7 @@ tuning_option = {
     'log_filename': log_file,
 
     'tuner': 'xgb',
-    'n_trial': 10,
+    'n_trial': 300,
     'early_stopping': 600,
 
     'measure_option': autotvm.measure_option(
@@ -94,7 +94,7 @@ tuning_option = {
 def tune_tasks(tasks,
               measure_option,
               tuner='xgb',
-              n_trial=10,
+              n_trial=300,
               early_stopping=None,
               log_filename='tuning.log',
               use_transfer_learning=True,
