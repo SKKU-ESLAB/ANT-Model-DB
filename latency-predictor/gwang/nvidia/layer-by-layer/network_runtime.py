@@ -36,23 +36,57 @@ def conv_3x3(net, in_channles, out_channels, prefix, activation=True):
         net = relay.nn.relu(net)
 
     return net
-   
+
+def conv_5x5(net, in_channels, out_channels, prefix, activation=True):
+    weight = relay.var(prefix + "_weight")
+    net = relay.nn.conv2d(net, weight, strides = (1,1), channels = out_channels, kernel_size=(5,5))
+
+    bias = relay.var(prefix + "_bias")
+    net = relay.nn.bias_add(net,bias)
+
+    if activation:
+        net = relay.nn.relu(net)
+
+    return net
+
+def dense(net, units, prefix, activation=True):
+    weight = relay.var(prefix + "_weight")
+    net = relay.nn.dense(net, weight, units)
+
+    bias = relay.var(prefix + "_bias")
+    net = relay.nn.bias_add(net, bias, axis=-1)
+
+    if activation:
+        net = relay.nn.relu(net)
+
+    return net
+
 def get_net(batch_size, image_shape, num_classes, dtype):
     height = image_shape[1]
     width = image_shape[2]
     data_shape = (batch_size,) + image_shape
     net = relay.var("data", shape=data_shape, dtype=dtype)
 
-    net = conv_3x3(net, 3, 64, "conv1_1")
-        
+    #net = conv_3x3(net, 3, 64, "conv1_1")
+    net = conv_5x5(net, 3, 20, "conv1")
+    net = relay.nn.max_pool2d(net, pool_size=(2,2), strides=(2,2))
+    net = conv_5x5(net, 20, 50, "conv2")
+    net = relay.nn.max_pool2d(net, pool_size=(2,2), strides=(2,2))
+    
+    net = relay.nn.batch_flatten(net)
+    net = dense(net, 500, "fc1")
+    net = dense(net, 10, "fc2", activation=False)
+    net = relay.nn.softmax(net)
+            
     out = net
+
     args = relay.analysis.free_vars(out)
 
     return relay.Function(args, out)
 
 def get_workload(batch_size=1,
-                 num_classes=1000,
-                 image_shape=(3, 224, 224),
+                 num_classes=10,
+                 image_shape=(1, 28, 28),
                  dtype="float32",
                  **kwargs):
     net = get_net(batch_size=batch_size,
@@ -62,10 +96,10 @@ def get_workload(batch_size=1,
                   **kwargs)
     return create_workload(net)
 
-#target = tvm.target.cuda()
+target = tvm.target.cuda()
 target_host = 'llvm -target=aarch64-linux-gnu'
 #target = tvm.target.cuda("-model=tx2")
-target = tvm.target.create('llvm -target=aarch64-linux-gnu')
+#target = tvm.target.create('llvm -target=aarch64-linux-gnu')
 
 
 network = 'sample'
