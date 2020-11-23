@@ -1,23 +1,28 @@
-# Latency-Predictor
-This project is designed to make latency predictor of mobile-devices.
+# ANT Model DB
+This project includes model database and model profilers used in ANT framework.
 
-We can measure latency using programs in latency-predictor, which implemented based on TVM.
+The model database provides DNN models for various range of IoT devices.
+
+## Model Database
 
 
-## References
+## Model Profiler
+Model profiler can measure latency using programs in latency-predictor, which implemented based on TVM.
+
+### References
 This project is implemented based on TVM
 
 * TVM  [https://github.com/apache/incubator-tvm][tvm]
 
 
-## Prerequisites
+### Prerequisites
 
 * llvm [Download Page][llvm]
 * CUDNN [Download Page][CUDNN]
 * CUDA
 
 ## License
-Latency-Predictor is open source software under the Apache 2.0 license. 
+ANT-Model-DB is open source software under the Apache 2.0 license. 
 
 [tvm]:https://github.com/apache/incubator-tvm
 [llvm]:http://releases.llvm.org/download.html
