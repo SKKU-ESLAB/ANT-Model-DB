@@ -1,0 +1,14 @@
+model_name,compress_type,acc@1,flops,model_size,task
+MobileNetV2-quant4,quant4,58.16,6171278,1752446,imagenet
+MobileNetV2-quant6,quant6,68.94,12285376,2628668,imagenet
+MobileNetV2-quant8,quant8,71.74,20845112,3504891,imagenet
+MobileNetV3-large-quant6,quant6,69.252,7727445,4111115,imagenet
+MobileNetV3-large-quant8,quant8,73.44,13737680,5481486,imagenet
+MobileNetV3-small-quant6,quant6,61.576,2733430,2348654,imagenet
+MobileNetV3-small-quant8,quant8,66.38,4859431,3131538,imagenet
+ResNet18-quant4,quant4,65.12,33599744,5844761,imagenet
+ResNet18-quant6,quant6,70.02,66339584,8767141,imagenet
+ResNet18-quant8,quant8,70.35,112175360,11689521,imagenet
+ResNet34-quant4,quant4,68.79,62501120,10898845,imagenet
+ResNet34-quant6,quant6,72.97,131367680,16348267,imagenet
+ResNet34-quant8,quant8,73.24,227780864,21797689,imagenet
