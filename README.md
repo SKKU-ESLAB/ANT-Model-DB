@@ -1,5 +1,5 @@
 # ANT Model DB
-This project includes model database and model profilers used in ANT framework.
+This project includes model database, model profilers, and model dashboard used in ANT framework.
 
 The model database provides DNN models for various range of IoT devices.
 
@@ -21,7 +21,9 @@ This project is implemented based on TVM
 * CUDNN [Download Page][CUDNN]
 * CUDA
 
-## License
+# Model Dashboard
+
+# License
 ANT-Model-DB is open source software under the Apache 2.0 license. 
 
 [tvm]:https://github.com/apache/incubator-tvm
