@@ -3,10 +3,11 @@ import argparse
 import struct
 import socket
 import pickle
+import time
 
-from utils import KernelTask, recvall
+from utils import KernelTask, KernelDB, recvall
 
-def run():
+def server_run(args):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
@@ -34,8 +35,21 @@ def run():
 
     server_socket.close()
 
+def auto_tune(args):
+    kernel_db = KernelDB()
+
+    while True:
+        new_model_list = kernel_db.find_new_model()
+        kernel_db.tune_model(new_model_list)
+
+        # Sleep
+        print("Sleep...")
+        time.sleep(5)
+   
+
 def main(args):
-    run()
+    #server_run(args)
+    auto_tune(args)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
