@@ -8,6 +8,11 @@ Model database records compressed DNN models.
 
 Kernel database tunes kernel codes of those compressed models and collects them.
 
+* Usage
+```bash
+python modeldb_sender.py --table <model_db_table_name> --path <directory_to_record> [--save_as_csv]
+```
+
 
 ## Model Profiler
 Model profiler can measure latency using programs in latency-predictor, which implemented based on TVM.
