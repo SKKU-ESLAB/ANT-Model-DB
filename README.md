@@ -30,6 +30,15 @@ This project is implemented based on TVM
 * CUDA
 
 ## Model Dashboard
+Model dashboard is a web page that shows available compressed model in model database and kernel code in kernel database.
+This dashboard web server is implemented based on Flask.
+
+* Usage
+
+```bash
+python dashboard-run.py 
+```
+
 <img src="images/dashboard-screenshot.png"/>
 
 # License
