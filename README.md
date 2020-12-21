@@ -3,7 +3,10 @@ This project includes model database, model profilers, and model dashboard used 
 
 The model database provides DNN models for various range of IoT devices.
 
-## Model Database
+## Model/Kernel Database
+Model database records compressed DNN models.
+
+Kernel database tunes kernel codes of those compressed models and collects them.
 
 
 ## Model Profiler
@@ -22,6 +25,7 @@ This project is implemented based on TVM
 * CUDA
 
 ## Model Dashboard
+<img src="images/dashboard-screenshot.png"/>
 
 # License
 ANT-Model-DB is open source software under the Apache 2.0 license. 
