@@ -1,0 +1,25 @@
+<table>
+    <thead>
+        <tr>
+            {# get colun name #}
+            {% for key, item in data.items() %}
+                <th>{{key}}</th>
+            {% endfor %}
+        </tr>
+
+    <thead>
+    <tbody>
+    <tr>
+        {# set value#}
+        {% for row in data2 %}
+            <td>{{row}}</td>
+        {# if show 3 columns, show next row #}
+        {% if loop.index0 % 2 == 1 %}
+    </tr>
+    <tr>
+        {% endif %}
+        {% endfor %}
+    </tr>
+    </tbody>
+</table>
+

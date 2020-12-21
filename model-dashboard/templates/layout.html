@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en" class="h-100">
+
+ <!------------------------------------------------------------------------------>
+ <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+    <meta name="viewport" content="width=device-width, shrink-to-fit=no, initial-scale=1">
+  
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.5.3/dist/css/bootstrap.min.css" integrity="sha384-TX8t27EcRE3e/ihU7zmQxVncDAy5uIKz4rEkgIXeMed4M0jlfIDPvg6uqKI2xXr2" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.10.22/css/jquery.dataTables.min.css">
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+      
+     
+    <title>Model DB</title>
+  </head>
+
+ <!------------------------------------------------------------------------------>
+ <!-- Global site tag (gtag.js) - Google Analytics -->
+ <script async src="https://www.googletagmanager.com/gtag/js?id=UA-142835495-1"></script>
+ <script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-142835495-1');
+
+
+  function copyToClipboard(val) {
+  const element = document.createElement('textarea');
+  element.value = val;
+  element.setAttribute('readonly', '');
+  element.style.position = 'absolute';
+  element.style.left = '-9999px';
+  document.body.appendChild(element);
+  element.select();
+  var returnValue = document.execCommand('copy');
+  document.body.removeChild(element);
+  if (!returnValue) {
+    throw new Error('copied nothing');
+  }
+  }
+ </script>
+
+ <!------------------------------------------------------------------------------>
+ <body class="d-flex flex-column h-100">
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js" integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj" crossorigin="anonymous"></script>
+    <script src="https://cdn.datatables.net/1.10.22/js/jquery.dataTables.min.js">
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js" integrity="sha384-9/reFTGAW83EW2RDu2S0VKaIzap3H66lZH81PoYlFhbGU+6BZp6G7niu735Sk7lN" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.3/dist/js/bootstrap.min.js" integrity="sha384-w1Q4orYjBQndcko6MimVbzY0tgp4pWB4lZ7lr30WKz0vr/aWKhXdBNmNb5D92v7s" crossorigin="anonymous"></script>
+  <div class="container-fluid">
+   <nav class="navbar bg-primary navbar-expand-lg navbar-light" style="border-bottom: 1px solid #d5e5ef; font-family: Arial;">
+ 
+
+    &nbsp;
+    &nbsp;
+
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarMenu" aria-controls="navbarMenu" aria-expanded="false" aria-label="Toggle navigation">
+    <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="navbarMenu">
+    <div id="vspace8"></div>
+    <ul class="navbar-nav mr-auto">
+
+    <li class="nav-item">
+      <a href="http://nyx.skku.ac.kr/?page_id=2" class="nav-link" style="vertical-align: middle; display: table-cell; color:aliceblue">Contacts</a>
+    </li>
+    <li class="nav-item">
+      <i><a href="https://github.com/SKKU-ESLAB/" class="nav-link" style="vertical-align: middle; display: table-cell; color:aliceblue">GitHub</a></i>
+    </li>
+    <li class="nav-item">
+      <i><b><a href="/pruning" class="nav-link" style="vertical-align: middle; display: table-cell; color:aliceblue">Pruning</a></b></i>
+    </li>
+    <li class="nav-item">
+      <i><b><a href="/quantization" class="nav-link" style="vertical-align: middle; display: table-cell; color:aliceblue">Quantization</a></b></i>
+    </li>
+    <!--
+    <li class="nav-item">
+      <i><b><a href="/kernel_layers" class="nav-link" style="vertical-align: middle; display: table-cell; color:aliceblue">Kernel (Layers)</a></b></i>
+    </li>
+    -->
+    <li class="nav-item">
+      <i><b><a href="/kernel_models" class="nav-link" style="vertical-align: middle; display: table-cell; color:aliceblue">Model Library</a></b></i>
+    </li>
+    </ul>
+
+    <ul class="navbar-nav ml-auto">
+    <ul class="navbar-nav mr-auto">
+      &nbsp;
+    </ul>
+    </ul>
+  </div>
+  </nav>
+   <div id="vspace8">
+    <div class="container">
+    <div > </div>
+     <h3><span style="color:#286eb1; height: 300px; text-align: center;">Model Database for IoT devices</span></h3>
+     <small>
+            <i> Various compression ratios and compression methods are applied: quantization, channel-wise pruning, and group-level pruning </i>
+          </small>
+      <div id="vspace8"></div>
+        <div id="ck_entries" >
+          <center>
+            <b><i>{% block content0 %}{% endblock %}</i></b>
+            <br/>
+            {% block content3 %}{% endblock %}
+        </center>
+          </div>
+          <hr>
+   <div class="container"></div>
+    <div id="ck_entries">
+    <div align="center" style="overflow-x: auto;">
+    {% block content1 %}
+    {% endblock %}
+    </div>
+  
+    <div align="center" style="overflow-x: auto;">
+    {% block content2 %}
+    {% endblock %}
+    </div>
+  </div>
+  </div>
+  </div>
+  
+  
+  <div id="vspace8"></div>
+  <center>
+  
+    
+  Compressed models can be downloaded using their <i>model_name</i> when you use ANT framework, or you can download file by link in table. <br>
+  <hr>
+  </center>
+  
+  
+  
+  <div>
+  <div id="vspace8"></div>
+  
+  
+  </div>
+  <!-- All versions of this object -------------------------------------------->
+  <!-- All Files of this object ----------------------------------------------->
+  <!-- Comments -------------------------------------------->
+  <div id="vspace8"></div>
+  <div id="ck_entries5">
+  <div id="comments" style="padding:4px;">
+  </div>
+  </div>
+  </div>
+  <script type="text/javascript">
+    $(document).ready(function () {
+    $('#dtBasicExample').DataTable();
+    $('.dataTables_length').addClass('bs-select');
+    });
+  </script>
+  
+</body>
+  
+  
+  
+  <style>
+  #ck_entries
+  {
+  width:99%; 
+  text-align:left;
+  padding:4px;
+  margin:4px;
+  margin-bottom:10px;
+  border: 1px solid #AFAFAF;
+  background-color: #FFFFFF;
+  border-spacing: 0px;
+  -webkit-box-shadow: 2px 2px 4px 1px #bbb;
+  box-shadow: 2px 2px 4px 1px #bbb;
+  }
+  
+  th {
+  background-image: -webkit-gradient(linear,left top, left bottom,from(transparent),to(transparent)),
+      url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2221%22 height=%229%22 viewBox=%220 0 21 9%22%3E %3Cpath d=%22M14.5 5l-4 4-4-4zM14.5 4l-4-4-4 4z%22/%3E %3C/svg%3E");
+  background-image: linear-gradient(transparent,transparent),
+      url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2221%22 height=%229%22 viewBox=%220 0 21 9%22%3E %3Cpath d=%22M14.5 5l-4 4-4-4zM14.5 4l-4-4-4 4z%22/%3E %3C/svg%3E");
+  cursor: pointer;
+  background-repeat: no-repeat;
+  background-position: center right;
+  padding-right: 30px;
+  }
+  
+  table {
+  border-spacing: 2px;
+  }
+  td {
+  }
+  
+  </style>
+</html>
