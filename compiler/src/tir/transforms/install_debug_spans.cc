@@ -23,14 +23,15 @@
     the location to which the ops would be printed
  */
 
-#include "install_debug_spans.h"
+#include "./install_debug_spans.h"
 
 #include <tvm/tir/transform.h>
 
 #include <string>
 #include <utility>
 
-#include "../../printer/tir_text_printer_debug.h"
+#include "../../relay/printer/tir_text_printer_debug.h"
+#include "ir_utils.h"
 
 namespace tvm {
 namespace tir {
@@ -42,7 +43,7 @@ Stmt DebugInfoInstaller::InstallInfo(const std::string& name, const Stmt& stmt) 
 
 DebugInfoInstaller::DebugInfoInstaller(const Stmt& stmt, const std::string& filename) {
   // Determine the line that each stmt/expr will be printed on
-  tvm::tir::TIRTextPrinterDebug printer(false);
+  tvm::relay::TIRTextPrinterDebug printer(false);
 
   // Fill in the stmts and exprs' line info
   auto result = printer.Print(stmt).str();
@@ -128,19 +129,30 @@ TVM_TIR_TRANSFORMS_INSTALL_DEBUG_SPANS_SUPPORTED_STMTS
 namespace transform {
 
 Pass InstallDebugSpans() {
-  auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
-    ICHECK(m->functions.size() == 1)
-        << "Debug info can only be added to IRModules with a single function";
-    // There is known to be only 1 function in the module at this point
-    auto entry = m->functions.begin();
-    auto name = std::get<0>(*entry)->name_hint;
-    auto* n = f.CopyOnWrite();
+  auto pass_func = [](IRModule mod, PassContext ctx) {
+    Map<GlobalVar, PrimFunc> external_host_functions;
+    for (const auto& [gvar, base_func] : mod->functions) {
+      if (auto opt = base_func.as<PrimFunc>()) {
+        auto prim_func = opt.value();
+        if (IsHostFunc(prim_func).value_or(false) &&
+            prim_func->GetAttr<String>(tvm::attr::kGlobalSymbol)) {
+          external_host_functions.Set(gvar, prim_func);
+        }
+      }
+    }
 
-    n->body = DebugInfoInstaller::InstallInfo(std::move(name), std::move(f->body));
+    ICHECK_EQ(external_host_functions.size(), 1)
+        << "Debug info can only be added to IRModules with a single host function";
 
-    return f;
+    for (auto [gvar, prim_func] : external_host_functions) {
+      auto name = prim_func->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
+      prim_func.CopyOnWrite()->body = DebugInfoInstaller::InstallInfo(name, prim_func->body);
+      mod.CopyOnWrite()->Update(gvar, prim_func);
+    }
+
+    return mod;
   };
-  return CreatePrimFuncPass(pass_func, 0, "tir.InstallDebugSpans", {});
+  return tvm::transform::CreateModulePass(pass_func, 0, "tir.InstallDebugSpans", {});
 }
 
 TVM_REGISTER_GLOBAL("tir.transform.InstallDebugSpans").set_body_typed(InstallDebugSpans);

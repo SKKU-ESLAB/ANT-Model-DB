@@ -24,12 +24,13 @@ def run_passes(func: tvm.tir.PrimFunc):
     mod = tvm.IRModule.from_expr(func)
     mod = tvm.tir.transform.StorageFlatten(64)(mod)
 
-    cuda_target = tvm.target.Target("cuda")
+    cuda_target = tvm.target.Target("cuda", host="llvm")
 
     mod = tvm.tir.transform.Apply(
         lambda f: f.with_attr({"global_symbol": "test", "target": cuda_target})
     )(mod)
 
+    mod = tvm.tir.transform.AnnotateDeviceRegions()(mod)
     mod = tvm.tir.transform.SplitHostDevice()(mod)
     return tvm.tir.transform.ThreadSync("shared")(mod)
 
@@ -55,7 +56,7 @@ def test_thread_storage_sync():
 
     func = tvm.te.schedule.SchedulePostProcToPrimFunc([A, A2], stmt, None)
     mod = run_passes(func)
-    f = mod["test_kernel0"]
+    f = mod["test_kernel"]
     body_list = tvm.tir.stmt_list(f.body.body.body)
     assert body_list[1].value.op.same_as(tvm.ir.Op.get("tir.tvm_storage_sync"))
 
@@ -92,16 +93,16 @@ def test_sync_else_branch():
     stmt = ir(A, B)
     func = tvm.te.schedule.SchedulePostProcToPrimFunc([A, B], stmt, None)
     mod = run_passes(func)
-    assert "@tir.tvm_storage_sync" in str(mod)
+    assert "T.tvm_storage_sync" in str(mod)
 
 
 @tvm.testing.requires_cuda
 def test_sync_read_thread_id_independent_location():
     @T.prim_func
-    def func(p0_arg: T.Buffer[(1, 2, 1, 1), "float32"], p1: T.Buffer[2, "float32"]) -> None:
+    def func(p0_arg: T.Buffer((1, 2, 1, 1), "float32"), p1: T.Buffer(2, "float32")) -> None:
         threadIdx_x = T.env_thread("threadIdx.x")
         blockIdx_x = T.env_thread("blockIdx.x")
-        p0 = T.buffer_decl([2], dtype="float32", data=p0_arg.data)
+        p0 = T.Buffer([2], dtype="float32", data=p0_arg.data)
         result_local = T.alloc_buffer([1], dtype="float32", scope="local")
         temp_shared = T.alloc_buffer([1], dtype="float32", scope="shared")
         T.launch_thread(blockIdx_x, 8)
@@ -115,7 +116,7 @@ def test_sync_read_thread_id_independent_location():
         result_local[0] = result_local[0] + temp_shared[0] * p1[1]
 
     mod = run_passes(func)
-    assert "@tir.tvm_storage_sync" in str(mod)
+    assert "T.tvm_storage_sync" in str(mod)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,15 @@ from ...ir_builder import ir as I
 from .._core import Parser, dispatch, doc
 
 
+class ModuleWithGlobalVars:
+    """A Module that can add global vars during parsing, to support `Module.function` syntax."""
+
+    def __getattr__(self, attr):
+        # Customize the error message.
+        # NOTE: `__getattr__` is only called when the attribute access fails with an AttributeError
+        raise AttributeError(f"Cannot find the function `{attr}` in the current IRModule")
+
+
 @dispatch.register(token="ir", type_name="ClassDef")
 def _visit_class_def(self: Parser, node: doc.ClassDef) -> None:
     """The class definition visiting method for ir module.
@@ -32,10 +41,32 @@ def _visit_class_def(self: Parser, node: doc.ClassDef) -> None:
     node : doc.ClassDef
         The doc AST class definition node.
     """
+
     with self.var_table.with_frame():
         with I.ir_module():
+            # Step 0. Add the class name to the var table
+            fake_module = ModuleWithGlobalVars()
+            self.var_table.add(node.name, fake_module)
+
+            # Step 1. Visit non-function stmts, including but not limited to
+            # 1. `I.module_attrs`
+            # 2. `I.module_global_infos`
             with self.with_dispatch_token("ir"):
-                self.visit_body(node.body)
+                for stmt in node.body:
+                    if not isinstance(stmt, doc.FunctionDef):
+                        self.visit(stmt)
+
+            # Step 2. Visit function stmts to declare the global vars
+            for stmt in node.body:
+                if isinstance(stmt, doc.FunctionDef):
+                    global_var = self.visit_tvm_declare_function(stmt)
+                    fake_module.__setattr__(stmt.name, global_var)
+
+            # Step 3. Visit and parse the functions
+            with self.with_dispatch_token("ir"):
+                for stmt in node.body:
+                    if isinstance(stmt, doc.FunctionDef):
+                        self.visit(stmt)
 
 
 @dispatch.register(token="ir", type_name="Assign")
@@ -53,7 +84,7 @@ def _visit_assign(_self: Parser, _node: doc.Assign) -> None:
 
 
 @dispatch.register(token="ir", type_name="Expr")
-def _visit_expr(_self: Parser, _node: doc.Expr) -> None:
+def _visit_expr(self: Parser, node: doc.Expr) -> None:
     """The expression visiting method for ir module.
 
     Parameters
@@ -64,3 +95,15 @@ def _visit_expr(_self: Parser, _node: doc.Expr) -> None:
     node : doc.ClassDef
         The doc AST expression node.
     """
+    self.eval_expr(node.value)
+
+
+@dispatch.register(token="default", type_name="Assign")
+def visit_assign(self: Parser, node: doc.Assign) -> None:
+    if len(node.targets) != 1:
+        self.report_error(node, "Consequential assignments like 'a = b = c' are not supported.")
+    lhs = node.targets[0]
+    rhs = self.eval_expr(node.value)
+    self.eval_assign(
+        target=lhs, source=rhs, bind_value=lambda _a, _b, _c, value: value, allow_shadowing=True
+    )

@@ -135,10 +135,9 @@ void CheckOrSetAttr(Map<String, ObjectRef>* attrs, const String& name, const Str
   if (iter == attrs->end()) {
     attrs->Set(name, value);
   } else {
-    const auto* str = (*iter).second.as<StringObj>();
-    ICHECK(str != nullptr && GetRef<String>(str) == value)
-        << "ValueError: Expects \"" << name << "\" to be \"" << value
-        << "\", but gets: " << (*iter).second;
+    auto str = (*iter).second.as<String>();
+    ICHECK(str && str.value() == value) << "ValueError: Expects \"" << name << "\" to be \""
+                                        << value << "\", but gets: " << (*iter).second;
   }
 }
 
@@ -161,8 +160,8 @@ TargetJSON UpdateCUDAAttrs(TargetJSON target) {
     // Use the compute version of the first CUDA GPU instead
     TVMRetValue version;
     if (!DetectDeviceFlag({kDLCUDA, 0}, runtime::kComputeVersion, &version)) {
-      LOG(WARNING) << "Unable to detect CUDA version, default to \"-arch=sm_20\" instead";
-      archInt = 20;
+      LOG(WARNING) << "Unable to detect CUDA version, default to \"-arch=sm_50\" instead";
+      archInt = 50;
     } else {
       archInt = std::stod(version.operator std::string()) * 10 + 0.1;
     }
@@ -189,8 +188,8 @@ TargetJSON UpdateNVPTXAttrs(TargetJSON target) {
     // Use the compute version of the first CUDA GPU instead
     TVMRetValue version;
     if (!DetectDeviceFlag({kDLCUDA, 0}, runtime::kComputeVersion, &version)) {
-      LOG(WARNING) << "Unable to detect CUDA version, default to \"-mcpu=sm_20\" instead";
-      arch = 20;
+      LOG(WARNING) << "Unable to detect CUDA version, default to \"-mcpu=sm_50\" instead";
+      arch = 50;
     } else {
       arch = std::stod(version.operator std::string()) * 10 + 0.1;
     }
@@ -379,6 +378,7 @@ TVM_REGISTER_TARGET_KIND("vulkan", kDLVulkan)
     .add_attr_option<Bool>("supports_push_descriptor")
     .add_attr_option<Bool>("supports_dedicated_allocation")
     .add_attr_option<Bool>("supports_integer_dot_product")
+    .add_attr_option<Bool>("supports_cooperative_matrix")
     .add_attr_option<Integer>("supported_subgroup_operations")
     // Physical device limits
     .add_attr_option<Integer>("max_num_threads", Integer(256))
@@ -422,9 +422,10 @@ TVM_REGISTER_TARGET_KIND("hexagon", kDLHexagon)
     .add_attr_option<Array<String>>("llvm-options")
     .add_attr_option<Integer>("num-cores")
     .add_attr_option<Integer>("vtcm-capacity")
-    .set_default_keys({"hexagon"});
+    .set_default_keys({"hexagon", "cpu"});
 
-TVM_REGISTER_TARGET_KIND("stackvm", kDLCPU);
+TVM_REGISTER_TARGET_KIND("stackvm", kDLCPU)  // line break
+    .set_default_keys({"cpu"});
 
 TVM_REGISTER_TARGET_KIND("ext_dev", kDLExtDev);
 

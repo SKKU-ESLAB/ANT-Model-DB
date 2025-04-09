@@ -164,7 +164,7 @@ class TVM_DLL VirtualMachine : public runtime::ModuleNode {
    *   If the function needs resource from the module(e.g. late linking),
    *   it should capture sptr_to_self.
    */
-  virtual PackedFunc GetFunction(const std::string& name, const ObjectPtr<Object>& sptr_to_self);
+  virtual PackedFunc GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self);
 
   virtual ~VirtualMachine() {}
 
@@ -177,6 +177,9 @@ class TVM_DLL VirtualMachine : public runtime::ModuleNode {
    * \param exec The executable.
    */
   virtual void LoadExecutable(const ObjectPtr<Executable>& exec);
+
+  /*! \brief Get the property of the runtime module .*/
+  int GetPropertyMask() const final { return ModulePropertyMask::kRunnable; }
 
  protected:
   /*! \brief Push a call frame on to the call stack. */
@@ -363,7 +366,6 @@ class TVM_DLL VirtualMachine : public runtime::ModuleNode {
    * \brief Creats inputs_ field, if it exists check its size.
    * \param func_name The function's name.
    * \param size inputs_ field size.
-   * \return VM function.
    */
   void CreateInputsOrCheckSize(const std::string& func_name, size_t size);
 

@@ -290,8 +290,8 @@ class ScheduleRule : public runtime::ObjectRef {
 
   /*! \brief Create default schedule rules for LLVM */
   TVM_DLL static Array<ScheduleRule, void> DefaultLLVM();
-  /*! \brief Create default schedule rules for x86 VNNI */
-  TVM_DLL static Array<ScheduleRule, void> DefaultVNNI();
+  /*! \brief Create default schedule rules for x86 (AVX512 and VNNI) */
+  TVM_DLL static Array<ScheduleRule, void> DefaultX86(const String& type);
   /*! \brief Create default schedule rules for CUDA */
   TVM_DLL static Array<ScheduleRule, void> DefaultCUDA();
   /*! \brief Create default postprocessors for CUDA with TensorCore */
@@ -300,6 +300,8 @@ class ScheduleRule : public runtime::ObjectRef {
   TVM_DLL static Array<ScheduleRule, void> DefaultHexagon();
   /*! \brief Create default schedule rules for Micro */
   TVM_DLL static Array<ScheduleRule, void> DefaultMicro();
+  /*! \brief Create default schedule rules for ARM CPU (NEON and DOTPROD) */
+  TVM_DLL static Array<ScheduleRule, void> DefaultARM(const String& type);
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(ScheduleRule, ObjectRef, ScheduleRuleNode);
 };

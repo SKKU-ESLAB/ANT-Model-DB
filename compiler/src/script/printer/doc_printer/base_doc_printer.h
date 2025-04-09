@@ -35,23 +35,6 @@ namespace printer {
 /*! \brief Range of byte offsets in a string */
 using ByteSpan = std::pair<size_t, size_t>;
 
-/*! \brief Options to customize DocPrinter's output */
-struct DocPrinterOptions {
-  /*! \brief Number of spaces for one level of indentation */
-  int indent_spaces = 4;
-
-  /*! \brief Whether to print the line numbers */
-  bool print_line_numbers = false;
-
-  /*!
-   * \brief Number of context lines to print around the underlined text.
-   *
-   * If set to a non-default value `n`, only print `n` context lines before and after
-   * the underlined pieces of text.
-   */
-  size_t num_context_lines = std::numeric_limits<size_t>::max();
-};
-
 /*!
  * \brief DocPrinter is responsible for printing Doc tree into text format
  * \details This is the base class for translating Doc into string.
@@ -67,7 +50,8 @@ class DocPrinter {
    *
    * \param options the option for printer
    */
-  explicit DocPrinter(const DocPrinterOptions& options);
+  explicit DocPrinter(const PrinterConfig& options);
+
   virtual ~DocPrinter() = default;
 
   /*!
@@ -87,7 +71,7 @@ class DocPrinter {
    *
    * \sa GetString
    */
-  void Append(const Doc& doc, Optional<ObjectPath> path_to_underline);
+  void Append(const Doc& doc, const PrinterConfig& cfg);
 
   /*!
    * \brief Get the printed string of all Doc appended
@@ -221,16 +205,26 @@ class DocPrinter {
   virtual void PrintTypedDoc(const ClassDoc& doc) = 0;
 
   /*!
+   * \brief Virtual method to print a CommentDoc
+   */
+  virtual void PrintTypedDoc(const CommentDoc& doc) = 0;
+
+  /*!
+   * \brief Virtual method to print a DocStringDoc
+   */
+  virtual void PrintTypedDoc(const DocStringDoc& doc) = 0;
+
+  /*!
    * \brief Increase the indent level of any content to be
    *        printed after this call
    */
-  void IncreaseIndent() { indent_ += options_.indent_spaces; }
+  void IncreaseIndent() { indent_ += options_->indent_spaces; }
 
   /*!
    * \brief Decrease the indent level of any content to be
    *        printed after this call
    */
-  void DecreaseIndent() { indent_ -= options_.indent_spaces; }
+  void DecreaseIndent() { indent_ -= options_->indent_spaces; }
 
   /*!
    * \brief Add a new line into the output stream
@@ -238,9 +232,12 @@ class DocPrinter {
    * \sa output_
    */
   std::ostream& NewLine() {
+    size_t start_pos = output_.tellp();
     output_ << "\n";
     line_starts_.push_back(output_.tellp());
     output_ << std::string(indent_, ' ');
+    size_t end_pos = output_.tellp();
+    underlines_exempted_.push_back({start_pos, end_pos});
     return output_;
   }
 
@@ -254,11 +251,14 @@ class DocPrinter {
    */
   std::ostringstream output_;
 
+  /*! \brief Spans that we have already committed to underline exemption. */
+  std::vector<ByteSpan> underlines_exempted_;
+
  private:
   void MarkSpan(const ByteSpan& span, const ObjectPath& path);
 
   /*! \brief Options to customize certain aspects of the output */
-  DocPrinterOptions options_;
+  PrinterConfig options_;
 
   /*! \brief the current level of indent */
   int indent_ = 0;
@@ -267,16 +267,16 @@ class DocPrinter {
   std::vector<size_t> line_starts_;
 
   /*! \brief Path of the object that we would like to underline */
-  Optional<ObjectPath> path_to_underline_;
+  Array<ObjectPath> path_to_underline_;
 
   /*!
    * \brief Candidate spans to be underlined, until we find a better match.
    * (A better match is an object with a longer path that is still a prefix of path_to_underline_.)
    */
-  std::vector<ByteSpan> current_underline_candidates_;
+  std::vector<std::vector<ByteSpan>> current_underline_candidates_;
 
   /*! \brief Path length of the objects that are current candidates for underlining. */
-  int current_max_path_length_;
+  std::vector<int> current_max_path_length_;
 
   /*! \brief Spans that we have already committed to underline. */
   std::vector<ByteSpan> underlines_;

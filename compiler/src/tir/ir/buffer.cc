@@ -387,13 +387,16 @@ Buffer Buffer::GetFlattenedBuffer() const {
     output_axis_separators.push_back(IntImm(dtype, i + 1));
   }
 
-  Buffer output = *this;
-  auto writer = output.CopyOnWrite();
-  writer->shape = output_shape;
-  writer->axis_separators = output_axis_separators;
-  writer->strides = {};
-
-  return output;
+  if (output_shape.size() == self->shape.size() && self->strides.empty()) {
+    return *this;
+  } else {
+    Buffer output = *this;
+    auto writer = output.CopyOnWrite();
+    writer->shape = output_shape;
+    writer->axis_separators = output_axis_separators;
+    writer->strides = {};
+    return output;
+  }
 }
 
 PrimExpr Buffer::vload(Array<PrimExpr> begin, DataType value_dtype) const {
@@ -611,12 +614,6 @@ tir::Buffer BufferWithOffsetAlignment(Array<PrimExpr> shape, DataType dtype, std
   return tir::Buffer(data, dtype, shape, Array<PrimExpr>(), elem_offset, name, data_alignment,
                      offset_factor, buffer_type);
 }
-
-TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
-    .set_dispatch<BufferNode>([](const ObjectRef& node, ReprPrinter* p) {
-      auto* op = static_cast<const BufferNode*>(node.get());
-      p->stream << "buffer(" << op->name << ", " << op << ")";
-    });
 
 TVM_REGISTER_NODE_TYPE(BufferNode);
 

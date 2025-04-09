@@ -20,17 +20,21 @@
 #define TVM_SCRIPT_PRINTER_TIR_UTILS_H_
 
 #include <tvm/script/printer/ir_docsifier.h>
-#include <tvm/script/printer/printer.h>
 #include <tvm/tir/analysis.h>
 #include <tvm/tir/buffer.h>
 #include <tvm/tir/expr.h>
 #include <tvm/tir/function.h>
+#include <tvm/tir/index_map.h>
 #include <tvm/tir/op.h>
 #include <tvm/tir/stmt.h>
+#include <tvm/tir/stmt_functor.h>
 
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "../utils.h"
 
 namespace tvm {
 namespace script {
@@ -69,11 +73,6 @@ class TIRFrame : public Frame {
   TVM_DEFINE_MUTABLE_NOTNULLABLE_OBJECT_REF_METHODS(TIRFrame, Frame, TIRFrameNode);
 };
 
-/*! \brief Creates the TIR common prefix, which is by default `T` */
-inline IdDoc TIR(const IRDocsifier& d) {  //
-  return IdDoc(d->ir_prefix.Get("tir").value_or("T"));
-}
-
 /*!
  * \brief Defines a variable in the IRDocsifier at the given frame,
  * and returns the corresponding IdDoc
@@ -82,7 +81,10 @@ inline IdDoc TIR(const IRDocsifier& d) {  //
  * \param frame The frame to define the variable in
  * \return The IdDoc corresponding to the variable
  */
-inline IdDoc DefineVar(const tir::Var& var, const Frame& frame, const IRDocsifier& d) {
+inline ExprDoc DefineVar(const tir::Var& var, const Frame& frame, const IRDocsifier& d) {
+  if (Optional<ExprDoc> doc = d->GetVarDoc(var)) {
+    return doc.value();
+  }
   return d->Define(var, frame, var->name_hint.empty() ? "v" : var->name_hint);
 }
 
@@ -108,10 +110,10 @@ inline IdDoc DefineBuffer(const tir::Buffer& buffer, const Frame& frame, const I
 inline void AsDocBody(const tir::Stmt& stmt, ObjectPath p, TIRFrameNode* f, const IRDocsifier& d) {
   if (const auto* seq_stmt = stmt.as<tir::SeqStmtNode>()) {
     Array<tir::Stmt> body = seq_stmt->seq;
-    p = p->Attr("seq");
     for (int i = 0, n = body.size(); i < n; ++i) {
       f->allow_concise_scoping = (i == n - 1);
-      Doc doc = d->AsDoc(body[i], p->ArrayIndex(i));
+      Doc doc = d->AsDoc(body[i], p->Attr("seq")->ArrayIndex(i));
+      doc->source_paths.push_back(p);
       if (const auto* block = doc.as<StmtBlockDocNode>()) {
         f->stmts.insert(f->stmts.end(), block->stmts.begin(), block->stmts.end());
       } else {
@@ -141,10 +143,15 @@ inline Optional<Frame> FindLowestVarDef(const ObjectRef& var, const IRDocsifier&
   }
   int n_frames = d->frames.size();
   std::unordered_map<const Object*, const FrameNode*> tir_to_frame;
+  const FrameNode* fallback_frame = nullptr;
   tir_to_frame.reserve(n_frames);
   for (int i = n_frames - 1; i >= 0; --i) {
     if (const auto* f = d->frames[i].as<TIRFrameNode>()) {
-      tir_to_frame[f->tir.get()] = f;
+      if (f->tir.defined()) {
+        tir_to_frame[f->tir.get()] = f;
+      } else if (fallback_frame == nullptr) {
+        fallback_frame = f;
+      }
     }
   }
   const std::vector<const Object*>& path = d->common_prefix.at(var.get());
@@ -153,8 +160,45 @@ inline Optional<Frame> FindLowestVarDef(const ObjectRef& var, const IRDocsifier&
       return GetRef<Frame>(tir_to_frame.at(*it));
     }
   }
+  if (fallback_frame != nullptr) {
+    return GetRef<Frame>(fallback_frame);
+  }
   return NullOpt;
 }
+
+/*! \brief Redirected method for the ReprPrinter */
+inline std::string ReprPrintTIR(const ObjectRef& obj, const PrinterConfig& cfg) {
+  IRDocsifier d(cfg);
+  d->SetCommonPrefix(obj, [](const ObjectRef& obj) {
+    return obj->IsInstance<tir::VarNode>() || obj->IsInstance<tir::BufferNode>();
+  });
+  With<TIRFrame> f(d, ObjectRef{nullptr});
+  (*f)->AddDispatchToken(d, "tir");
+  return Docsify(obj, d, *f, cfg);
+}
+
+/* \brief Specify which variables are defined along with the buffer
+ *
+ * Depending on the context, defining a buffer may define additional
+ * variables associated with the buffer.
+ */
+enum class BufferVarDefinition {
+  // All parameters in the buffer must be defined prior to this call.
+  // For example, DeclBuffer.
+  None,
+
+  // The data pointer is defined along with the buffer, but buffer
+  // parameters (shape/stride/elem_offset) must be defined prior to
+  // use.  For example, `BlockNode::alloc_buffers`, or the
+  // syntax-sugar representation of an `Allocate`/`DeclBuffer` pair.
+  DataPointer,
+
+  // The data pointer is defined along with the buffer, along with any
+  // buffer parameters (shape/stride/elem_offset) that have not
+  // previously been defined.  For example,
+  // `BlockNode::match_buffers`, or the `PrimFuncNode::buffer_map`.
+  MatchBuffer,
+};
 
 /*!
  * \brief Declare and define a buffer
@@ -164,10 +208,77 @@ inline Optional<Frame> FindLowestVarDef(const ObjectRef& var, const IRDocsifier&
  * \param p The object path
  * \param f The frame
  * \param d The IRDocsifier
+ * \param var_definitions Which variables are implicitly defined with
+ *     the buffer.
  * \return The ExprDoc corresponding to the buffer declaration
  */
 ExprDoc BufferDecl(const tir::Buffer& buffer, const String& method, const Array<ExprDoc>& args,
-                   const ObjectPath& p, const Frame& frame, const IRDocsifier& d);
+                   const ObjectPath& p, const Frame& frame, const IRDocsifier& d,
+                   BufferVarDefinition var_definitions);
+
+/*!
+ * \brief Declare and define a buffer as annotation
+ * \param buffer The buffer to be defined
+ * \param p The object path
+ * \param f The frame
+ * \param d The IRDocsifier
+ * \return The ExprDoc corresponding to the buffer declaration
+ */
+ExprDoc BufferAttn(const tir::Buffer& buffer, const ObjectPath& p, const Frame& frame,
+                   const IRDocsifier& d);
+
+/*!
+ * \brief Print the creation of a Var
+ * \param var The Var to be printed
+ * \param var_p The object path of the Var
+ * \param d The IRDocsifier
+ * \return The ExprDoc corresponding to the Var creation
+ */
+ExprDoc PrintVarCreation(const tir::Var& var, const ObjectPath& var_p, const IRDocsifier& d);
+
+/*! \brief A Var occurrence counter visitor */
+class OccurrenceCounter : public tir::StmtExprVisitor {
+ public:
+  /*! \brief The occurrence counter */
+  int count = 0;
+  /*! \brief The Var to count occurrence */
+  const tir::VarNode* v = nullptr;
+
+  void VisitExpr_(const tir::VarNode* op) final {
+    if (op == v) {
+      ++count;
+    }
+    tir::StmtExprVisitor::VisitExpr_(op);
+  }
+
+  void VisitStmt_(const tir::BufferStoreNode* op) final {
+    VisitBuffer(op->buffer.get());
+    tir::StmtExprVisitor::VisitStmt_(op);
+  }
+
+  void VisitExpr_(const tir::BufferLoadNode* op) final {
+    VisitBuffer(op->buffer.get());
+    tir::StmtExprVisitor::VisitExpr_(op);
+  }
+
+  void VisitStmt_(const tir::DeclBufferNode* op) final {
+    VisitBuffer(op->buffer.get());
+    tir::StmtExprVisitor::VisitStmt_(op);
+  }
+
+  void VisitBuffer(const tir::BufferNode* buffer) {
+    VisitExpr(buffer->data);
+    for (const PrimExpr& shape_i : buffer->shape) {
+      VisitExpr(shape_i);
+    }
+    for (const PrimExpr& stride_i : buffer->strides) {
+      VisitExpr(stride_i);
+    }
+    VisitExpr(buffer->elem_offset);
+  }
+
+  explicit OccurrenceCounter(const tir::VarNode* var) { v = var; }
+};
 
 }  // namespace printer
 }  // namespace script

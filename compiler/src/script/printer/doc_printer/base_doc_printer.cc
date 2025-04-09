@@ -25,20 +25,41 @@ namespace printer {
 
 namespace {
 
-void SortAndMergeSpans(std::vector<ByteSpan>* spans) {
-  if (spans->empty()) {
-    return;
+std::vector<ByteSpan> MergeAndExemptSpans(const std::vector<ByteSpan>& spans,
+                                          const std::vector<ByteSpan>& spans_exempted) {
+  // use prefix sum to merge and exempt spans
+  std::vector<ByteSpan> res;
+  std::vector<std::pair<size_t, int>> prefix_stamp;
+  for (ByteSpan span : spans) {
+    prefix_stamp.push_back({span.first, 1});
+    prefix_stamp.push_back({span.second, -1});
   }
-  std::sort(spans->begin(), spans->end());
-  auto last = spans->begin();
-  for (auto cur = spans->begin() + 1; cur != spans->end(); ++cur) {
-    if (cur->first > last->second) {
-      *++last = *cur;
-    } else if (cur->second > last->second) {
-      last->second = cur->second;
+  // at most spans.size() spans accumulated in prefix sum
+  // use spans.size() + 1 as stamp unit to exempt all positive spans
+  // with only one negative span
+  int max_n = spans.size() + 1;
+  for (ByteSpan span : spans_exempted) {
+    prefix_stamp.push_back({span.first, -max_n});
+    prefix_stamp.push_back({span.second, max_n});
+  }
+  std::sort(prefix_stamp.begin(), prefix_stamp.end());
+  int prefix_sum = 0;
+  int n = prefix_stamp.size();
+  for (int i = 0; i < n - 1; ++i) {
+    prefix_sum += prefix_stamp[i].second;
+    // positive prefix sum leads to spans without exemption
+    // different stamp positions guarantee the stamps in same position accumulated
+    if (prefix_sum > 0 && prefix_stamp[i].first < prefix_stamp[i + 1].first) {
+      if (res.size() && res.back().second == prefix_stamp[i].first) {
+        // merge to the last spans if it is successive
+        res.back().second = prefix_stamp[i + 1].first;
+      } else {
+        // add a new independent span
+        res.push_back({prefix_stamp[i].first, prefix_stamp[i + 1].first});
+      }
     }
   }
-  spans->erase(++last, spans->end());
+  return res;
 }
 
 size_t GetTextWidth(const std::string& text, const ByteSpan& span) {
@@ -77,13 +98,13 @@ ByteSpan PopNextUnderline(UnderlineIter* next_underline, UnderlineIter end_under
 
 void PrintChunk(const std::pair<size_t, size_t>& lines_range,
                 const std::pair<UnderlineIter, UnderlineIter>& underlines, const std::string& text,
-                const std::vector<size_t>& line_starts, const DocPrinterOptions& options,
+                const std::vector<size_t>& line_starts, const PrinterConfig& options,
                 size_t line_number_width, std::string* out) {
   UnderlineIter next_underline = underlines.first;
   ByteSpan current_underline = PopNextUnderline(&next_underline, underlines.second);
 
   for (size_t line_idx = lines_range.first; line_idx < lines_range.second; ++line_idx) {
-    if (options.print_line_numbers) {
+    if (options->print_line_numbers) {
       std::string line_num_str = std::to_string(line_idx + 1);
       line_num_str.push_back(' ');
       for (size_t i = line_num_str.size(); i < line_number_width; ++i) {
@@ -148,12 +169,12 @@ void PrintCut(size_t num_lines_skipped, std::string* out) {
 
 std::pair<size_t, size_t> GetLinesForUnderline(const ByteSpan& underline,
                                                const std::vector<size_t>& line_starts,
-                                               size_t num_lines, const DocPrinterOptions& options) {
+                                               size_t num_lines, const PrinterConfig& options) {
   size_t first_line_of_underline = GetLineIndex(underline.first, line_starts);
-  size_t first_line_of_chunk = MoveBack(first_line_of_underline, options.num_context_lines);
+  size_t first_line_of_chunk = MoveBack(first_line_of_underline, options->num_context_lines);
   size_t end_line_of_underline = GetLineIndex(underline.second - 1, line_starts) + 1;
   size_t end_line_of_chunk =
-      MoveForward(end_line_of_underline, options.num_context_lines, num_lines);
+      MoveForward(end_line_of_underline, options->num_context_lines, num_lines);
 
   return {first_line_of_chunk, end_line_of_chunk};
 }
@@ -181,8 +202,8 @@ size_t GetNumLines(const std::string& text, const std::vector<size_t>& line_star
   }
 }
 
-size_t GetLineNumberWidth(size_t num_lines, const DocPrinterOptions& options) {
-  if (options.print_line_numbers) {
+size_t GetLineNumberWidth(size_t num_lines, const PrinterConfig& options) {
+  if (options->print_line_numbers) {
     return std::to_string(num_lines).size() + 1;
   } else {
     return 0;
@@ -190,8 +211,7 @@ size_t GetLineNumberWidth(size_t num_lines, const DocPrinterOptions& options) {
 }
 
 std::string DecorateText(const std::string& text, const std::vector<size_t>& line_starts,
-                         const DocPrinterOptions& options,
-                         const std::vector<ByteSpan>& underlines) {
+                         const PrinterConfig& options, const std::vector<ByteSpan>& underlines) {
   size_t num_lines = GetNumLines(text, line_starts);
   size_t line_number_width = GetLineNumberWidth(num_lines, options);
 
@@ -235,22 +255,24 @@ std::string DecorateText(const std::string& text, const std::vector<size_t>& lin
   return ret;
 }
 
-}  // anonymous namespace
+}  // namespace
 
-DocPrinter::DocPrinter(const DocPrinterOptions& options) : options_(options) {
+DocPrinter::DocPrinter(const PrinterConfig& options) : options_(options) {
   line_starts_.push_back(0);
 }
 
-void DocPrinter::Append(const Doc& doc) { Append(doc, NullOpt); }
+void DocPrinter::Append(const Doc& doc) { Append(doc, PrinterConfig()); }
 
-void DocPrinter::Append(const Doc& doc, Optional<ObjectPath> path_to_underline) {
-  path_to_underline_ = path_to_underline;
-  current_max_path_length_ = 0;
-  current_underline_candidates_.clear();
+void DocPrinter::Append(const Doc& doc, const PrinterConfig& cfg) {
+  for (const ObjectPath& p : cfg->path_to_underline) {
+    path_to_underline_.push_back(p);
+    current_max_path_length_.push_back(0);
+    current_underline_candidates_.push_back(std::vector<ByteSpan>());
+  }
   PrintDoc(doc);
-
-  underlines_.insert(underlines_.end(), current_underline_candidates_.begin(),
-                     current_underline_candidates_.end());
+  for (const auto& c : current_underline_candidates_) {
+    underlines_.insert(underlines_.end(), c.begin(), c.end());
+  }
 }
 
 String DocPrinter::GetString() const {
@@ -265,58 +287,61 @@ String DocPrinter::GetString() const {
     text.push_back('\n');
   }
 
-  std::vector<ByteSpan> underlines = underlines_;
-  SortAndMergeSpans(&underlines);
-  return DecorateText(text, line_starts_, options_, underlines);
+  return DecorateText(text, line_starts_, options_,
+                      MergeAndExemptSpans(underlines_, underlines_exempted_));
 }
 
 void DocPrinter::PrintDoc(const Doc& doc) {
   size_t start_pos = output_.tellp();
 
-  if (const auto* doc_node = doc.as<LiteralDocNode>()) {
-    PrintTypedDoc(GetRef<LiteralDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<IdDocNode>()) {
-    PrintTypedDoc(GetRef<IdDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<AttrAccessDocNode>()) {
-    PrintTypedDoc(GetRef<AttrAccessDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<IndexDocNode>()) {
-    PrintTypedDoc(GetRef<IndexDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<OperationDocNode>()) {
-    PrintTypedDoc(GetRef<OperationDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<CallDocNode>()) {
-    PrintTypedDoc(GetRef<CallDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<LambdaDocNode>()) {
-    PrintTypedDoc(GetRef<LambdaDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<ListDocNode>()) {
-    PrintTypedDoc(GetRef<ListDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<TupleDocNode>()) {
-    PrintTypedDoc(GetRef<TupleDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<DictDocNode>()) {
-    PrintTypedDoc(GetRef<DictDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<SliceDocNode>()) {
-    PrintTypedDoc(GetRef<SliceDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<StmtBlockDocNode>()) {
-    PrintTypedDoc(GetRef<StmtBlockDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<AssignDocNode>()) {
-    PrintTypedDoc(GetRef<AssignDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<IfDocNode>()) {
-    PrintTypedDoc(GetRef<IfDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<WhileDocNode>()) {
-    PrintTypedDoc(GetRef<WhileDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<ForDocNode>()) {
-    PrintTypedDoc(GetRef<ForDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<ScopeDocNode>()) {
-    PrintTypedDoc(GetRef<ScopeDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<ExprStmtDocNode>()) {
-    PrintTypedDoc(GetRef<ExprStmtDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<AssertDocNode>()) {
-    PrintTypedDoc(GetRef<AssertDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<ReturnDocNode>()) {
-    PrintTypedDoc(GetRef<ReturnDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<FunctionDocNode>()) {
-    PrintTypedDoc(GetRef<FunctionDoc>(doc_node));
-  } else if (const auto* doc_node = doc.as<ClassDocNode>()) {
-    PrintTypedDoc(GetRef<ClassDoc>(doc_node));
+  if (auto doc_node = doc.as<LiteralDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<IdDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<AttrAccessDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<IndexDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<OperationDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<CallDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<LambdaDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<ListDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<TupleDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<DictDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<SliceDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<StmtBlockDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<AssignDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<IfDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<WhileDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<ForDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<ScopeDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<ExprStmtDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<AssertDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<ReturnDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<FunctionDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<ClassDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<CommentDoc>()) {
+    PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<DocStringDoc>()) {
+    PrintTypedDoc(doc_node.value());
   } else {
     LOG(FATAL) << "Do not know how to print " << doc->GetTypeKey();
     throw;
@@ -329,14 +354,15 @@ void DocPrinter::PrintDoc(const Doc& doc) {
 }
 
 void DocPrinter::MarkSpan(const ByteSpan& span, const ObjectPath& path) {
-  if (path_to_underline_.defined()) {
-    if (path->Length() >= current_max_path_length_ &&
-        path->IsPrefixOf(path_to_underline_.value())) {
-      if (path->Length() > current_max_path_length_) {
-        current_max_path_length_ = path->Length();
-        current_underline_candidates_.clear();
+  int n = path_to_underline_.size();
+  for (int i = 0; i < n; ++i) {
+    ObjectPath p = path_to_underline_[i];
+    if (path->Length() >= current_max_path_length_[i] && path->IsPrefixOf(p)) {
+      if (path->Length() > current_max_path_length_[i]) {
+        current_max_path_length_[i] = path->Length();
+        current_underline_candidates_[i].clear();
       }
-      current_underline_candidates_.push_back(span);
+      current_underline_candidates_[i].push_back(span);
     }
   }
 }

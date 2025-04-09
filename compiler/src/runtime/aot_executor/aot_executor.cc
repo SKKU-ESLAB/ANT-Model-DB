@@ -93,8 +93,7 @@ AotExecutor::AotExecutor(tvm::runtime::Module module, const std::vector<Device>&
   }
 }
 
-PackedFunc AotExecutor::GetFunction(const std::string& name,
-                                    const ObjectPtr<Object>& sptr_to_self) {
+PackedFunc AotExecutor::GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self) {
   // Return member functions during query.
   if (name == "set_input") {
     return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
@@ -156,6 +155,9 @@ PackedFunc AotExecutor::GetFunction(const std::string& name,
       CHECK(String::CanConvertFrom(args[0])) << "Input key is not a string";
       *rv = this->GetInputIndex(tvm::runtime::SanitizeName(args[0].operator String()));
     });
+  } else if (name == "get_input_name") {
+    return PackedFunc(
+        [sptr_to_self, this](TVMArgs args, TVMRetValue* rv) { *rv = this->GetInputName(args[0]); });
   } else {
     return PackedFunc();
   }
@@ -188,7 +190,12 @@ int AotExecutor::GetInputIndex(const std::string& name) {
       return i;
     }
   }
-  return -1;
+  ICHECK(false) << "Invalid input name.";
+}
+
+std::string AotExecutor::GetInputName(int index) {
+  auto inputs = metadata_->inputs();
+  return inputs[index]->name();
 }
 
 int AotExecutor::GetOutputIndex(const std::string& name) {

@@ -20,13 +20,13 @@ from numbers import Integral
 import tvm._ffi
 from tvm._ffi.base import string_types
 from tvm.ir import PointerType, PrimExpr, PrimType, Range
-from tvm.runtime import Object, convert
+from tvm.runtime import Object, Scriptable, convert
 
 from . import _ffi_api
 
 
 @tvm._ffi.register_object("tir.Buffer")
-class Buffer(Object):
+class Buffer(Object, Scriptable):
     """Symbolic data buffer in TVM.
 
     Buffer provide a way to represent data layout
@@ -93,7 +93,7 @@ class Buffer(Object):
                 elif value == "w":
                     mask = mask | Buffer.WRITE
                 else:
-                    raise ValueError("Unknown access_mask %s" % access_mask)
+                    raise ValueError(f"Unknown access_mask {access_mask}")
             access_mask = mask
         offset = convert(offset)
         extent = convert(extent)
@@ -179,7 +179,7 @@ class Buffer(Object):
 
     def __getitem__(self, indices):
         from ..arith import Analyzer  # pylint: disable=import-outside-toplevel
-        from .expr import BufferLoad, Ramp  # pylint: disable=import-outside-toplevel
+        from .expr import BufferLoad, Ramp, const  # pylint: disable=import-outside-toplevel
         from .stmt import BufferRegion  # pylint: disable=import-outside-toplevel
 
         if not isinstance(indices, (tuple, list)):
@@ -195,15 +195,22 @@ class Buffer(Object):
                     stop = self.shape[i] if index.stop is None else index.stop
                     region.append(Range.from_min_extent(start, analyzer.simplify(stop - start)))
                 else:
-                    region.append(Range.from_min_extent(index, 1))
+                    region.append(
+                        Range.from_min_extent(
+                            index, const(1, index.dtype) if isinstance(index, PrimExpr) else 1
+                        )
+                    )
             return BufferRegion(self, region)
         else:
             expr_indices = []
-            for index in indices:
+            for i, index in enumerate(indices):
                 if isinstance(index, slice):
                     start = 0 if index.start is None else index.start
                     stop = self.shape[i] if index.stop is None else index.stop
                     step = 1 if index.step is None else index.step
+                    # We should ensure the dtype of start is the same with that of step.
+                    if isinstance(start, tvm.tir.expr.PrimExpr) and isinstance(step, int):
+                        step = tvm.tir.expr.IntImm(start.dtype, step)
                     lanes = analyzer.simplify((stop - start + step - 1) // step)
                     if lanes == 1:
                         expr_indices.append(start)
@@ -336,7 +343,7 @@ def decl_buffer(
 
     if offset_factor != 0 and elem_offset is None:
         shape_dtype = shape[0].dtype if shape and hasattr(shape[0], "dtype") else "int32"
-        elem_offset = Var("%s_elem_offset" % name, shape_dtype)
+        elem_offset = Var(f"{name}_elem_offset", shape_dtype)
     if data is None:
         # Bool is represented as uint1 in the IR, but stored as int8
         storage_type = PrimType(dtype)

@@ -19,3 +19,12 @@
 [submodule "3rdparty/OpenCL-Headers"]
 	path = 3rdparty/OpenCL-Headers
 	url = https://github.com/KhronosGroup/OpenCL-Headers.git
+[submodule "3rdparty/gemmini"]
+	path = 3rdparty/gemmini
+	url = https://github.com/ucb-bar/gemmini
+[submodule "3rdparty/cnpy"]
+	path = 3rdparty/cnpy
+	url = https://github.com/rogersce/cnpy.git
+[submodule "3rdparty/cutlass_fpA_intB_gemm"]
+	path = 3rdparty/cutlass_fpA_intB_gemm
+	url = https://github.com/tlc-pack/cutlass_fpA_intB_gemm

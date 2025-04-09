@@ -22,8 +22,9 @@ import json
 
 import tvm
 from tvm import relay
+import tvm.micro.testing
 from tvm.relay.backend import Executor
-from tvm.contrib import graph_executor, utils
+from tvm.contrib import graph_executor
 from tvm import meta_schedule as ms
 from tvm.contrib.micro.meta_schedule.local_builder_micro import get_local_builder_micro
 from tvm.contrib.micro.meta_schedule.rpc_runner_micro import get_rpc_runner_micro
@@ -61,7 +62,7 @@ def create_relay_module():
 
 
 @tvm.testing.requires_micro
-@pytest.mark.xfail_on_fvp()
+@pytest.mark.skip_boards(["mps2_an521", "mps3_an547", "nucleo_f746zg", "stm32f746g_disco"])
 def test_ms_tuning_conv2d(workspace_dir, board, microtvm_debug, use_fvp, serial_number):
     """Test meta-schedule tuning for microTVM Zephyr"""
 
@@ -80,11 +81,19 @@ def test_ms_tuning_conv2d(workspace_dir, board, microtvm_debug, use_fvp, serial_
         "serial_number": serial_number,
         "config_main_stack_size": 4096,
     }
+    if isinstance(serial_number, list):
+        project_options["serial_number"] = serial_number[0]  # project_api expects an string.
+        serial_numbers = serial_number
+    else:
+        if serial_number is not None:  # use a single device in tuning
+            serial_numbers = [serial_number]
+        else:  # use two dummy serial numbers (for testing with QEMU)
+            serial_numbers = [str(i) for i in range(2)]
 
     boards_file = pathlib.Path(tvm.micro.get_microtvm_template_projects("zephyr")) / "boards.json"
     with open(boards_file) as f:
         boards = json.load(f)
-    target = tvm.target.target.micro(model=boards[project_options["board"]]["model"])
+    target = tvm.micro.testing.get_target("zephyr", board)
 
     runtime = relay.backend.Runtime("crt", {"system-lib": True})
     executor = Executor("aot", {"link-params": True})
@@ -95,7 +104,10 @@ def test_ms_tuning_conv2d(workspace_dir, board, microtvm_debug, use_fvp, serial_
     builder = get_local_builder_micro()
     with ms.Profiler() as profiler:
         with get_rpc_runner_micro(
-            platform=platform, options=project_options, session_timeout_sec=120
+            platform=platform,
+            options=project_options,
+            session_timeout_sec=120,
+            serial_numbers=serial_numbers,
         ) as runner:
 
             db: ms.Database = ms.relay_integration.tune_relay(
@@ -147,7 +159,7 @@ def test_ms_tuning_conv2d(workspace_dir, board, microtvm_debug, use_fvp, serial_
 
     # Build reference model (without tuning)
     dev = tvm.cpu()
-    target = tvm.target.target.micro(model="host")
+    target = tvm.micro.testing.get_target("crt")
     with tvm.transform.PassContext(
         opt_level=3, config={"tir.disable_vectorize": True}, disabled_pass=["AlterOpLayout"]
     ):

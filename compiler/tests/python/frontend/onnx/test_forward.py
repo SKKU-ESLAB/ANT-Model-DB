@@ -99,6 +99,14 @@ def get_tvm_output_with_vm(
             freeze_params=freeze_params,
             convert_config=convert_config,
         )
+        # handle the bfloat16 so we explicitly allocate
+        # bfloat16 arrays as input
+        for i, param in enumerate(mod["main"].params):
+            if param.type_annotation.dtype == "bfloat16":
+                input_data[i] = tvm.nd.empty(input_data[i].shape, "bfloat16").copyfrom(
+                    input_data[i]
+                )
+
     if validate_structural_equal:
         with tvm.testing.enable_span_filling():
             mod_with_span, _ = relay.frontend.from_onnx(
@@ -677,6 +685,45 @@ def test_unsqueeze(target, dev):
 
 
 @tvm.testing.parametrize_targets
+def test_unsqueeze_with_neg_axes(target, dev):
+    def verify_unsqueeze_with_neg_axes(opset=11):
+        in_shape = (2, 3, 4)
+        axis = (-2, -1)
+        out_shape = (2, 3, 4, 1, 1)
+        if opset < 13:
+            y = helper.make_node("Unsqueeze", ["in"], ["out"], axes=list(axis))
+            nodes = [y]
+        else:
+            axes = np.array(list(axis)).astype(np.int64)
+            axes = helper.make_node(
+                "Constant",
+                inputs=[],
+                outputs=["axes"],
+                value=onnx.helper.make_tensor(
+                    name="const_axes",
+                    data_type=onnx.TensorProto.INT64,
+                    dims=axes.shape,
+                    vals=axes.flatten().astype(int),
+                ),
+            )
+            y = helper.make_node("Unsqueeze", ["in", "axes"], ["out"])
+            nodes = [axes, y]
+
+        graph = helper.make_graph(
+            nodes,
+            "squeeze_test",
+            inputs=[helper.make_tensor_value_info("in", TensorProto.FLOAT, list(in_shape))],
+            outputs=[helper.make_tensor_value_info("out", TensorProto.FLOAT, list(out_shape))],
+        )
+
+        model = helper.make_model(graph, producer_name="squeeze_test")
+        verify_with_ort(model, [in_shape], target=target, dev=dev, opset=opset)
+
+    verify_unsqueeze_with_neg_axes()
+    verify_unsqueeze_with_neg_axes(opset=13)
+
+
+@tvm.testing.parametrize_targets
 def test_gather(target, dev):
     """test_gather"""
 
@@ -804,9 +851,7 @@ def test_scatter(target, dev):
         indices = np.array(indices, dtype="int32")
         updates = np.random.uniform(size=indices.shape).astype("float32")
 
-        y = helper.make_node(
-            "ScatterElements", ["data", "indices", "updates"], ["output"], axis=axis
-        )
+        y = helper.make_node("Scatter", ["data", "indices", "updates"], ["output"], axis=axis)
 
         graph = helper.make_graph(
             [y],
@@ -819,7 +864,9 @@ def test_scatter(target, dev):
             outputs=[helper.make_tensor_value_info("output", TensorProto.FLOAT, list(in_shape))],
         )
         model = helper.make_model(graph, producer_name="scatter_test")
-        verify_with_ort_with_inputs(model, [x, indices, updates], target=target, dev=dev)
+        # Scatter operator has been supported from version 9 and
+        # deprecated since version 11 of the default ONNX operator set
+        verify_with_ort_with_inputs(model, [x, indices, updates], target=target, dev=dev, opset=9)
 
     verify_scatter((4,), [1], 0)
     verify_scatter((1, 4), [[0]], 0)
@@ -827,6 +874,77 @@ def test_scatter(target, dev):
     verify_scatter((2, 2), [[1, 0], [0, 1]], 1)
     verify_scatter((3, 3, 3), [[[-1, -3]]], -1)
     verify_scatter((4, 3, 5, 6), [[[[2, 1, 0, 0]]]], 0)
+
+
+@tvm.testing.parametrize_targets
+def test_scatter_elements(target, dev):
+    """test_scatter_elements"""
+
+    def verify_scatter_elements(in_shape, indices, axis=0, reduction="update"):
+        x = np.random.uniform(size=in_shape).astype("float32")
+        indices = np.array(indices, dtype="int32")
+        updates = np.random.uniform(size=indices.shape).astype("float32")
+
+        scatter_elements_node = helper.make_node(
+            "ScatterElements",
+            ["data", "indices", "updates"],
+            ["output"],
+            axis=axis,
+            reduction=reduction,
+        )
+
+        graph = helper.make_graph(
+            [scatter_elements_node],
+            "scatter_elements_test",
+            inputs=[
+                helper.make_tensor_value_info("data", TensorProto.FLOAT, list(in_shape)),
+                helper.make_tensor_value_info("indices", TensorProto.INT32, list(indices.shape)),
+                helper.make_tensor_value_info("updates", TensorProto.FLOAT, list(indices.shape)),
+            ],
+            outputs=[helper.make_tensor_value_info("output", TensorProto.FLOAT, list(in_shape))],
+        )
+        model = helper.make_model(graph, producer_name="scatter_elements_test")
+        verify_with_ort_with_inputs(model, [x, indices, updates], target=target, dev=dev)
+
+    # Usual scatter for 1d input
+    verify_scatter_elements((4,), [2, 3])
+    # Usual scatter with specified positive axis
+    verify_scatter_elements((2, 2), [[1, 0], [0, 1]], 1)
+    # Usual scatter for 3d input with spicified negative indices and axis
+    verify_scatter_elements((3, 3, 3), [[[-1, -3]]], -1)
+    # Usual scatter for 4d input
+    verify_scatter_elements((4, 3, 5, 6), [[[[2, 1, 0, 0]]]])
+    # Scatter elements with addition reduction of duplicates
+    verify_scatter_elements(
+        (3, 3, 3),
+        [[[0, 2, 1], [1, 1, 1], [2, 1, 0]], [[0, 2, 1], [1, 1, 1], [2, 1, 0]]],
+        0,
+        "add",
+    )
+    # Scatter elements with reduction and specified axis
+    verify_scatter_elements((3, 3, 3), [[[2, 2, 2], [1, 1, 1], [0, 0, 0]]], 2, "add")
+    # Scatter elements with multiplication reduction of duplicates
+    verify_scatter_elements(
+        (3, 3, 3),
+        [[[0, 2, 1], [1, 1, 1], [2, 1, 0]], [[0, 2, 1], [1, 1, 1], [2, 1, 0]]],
+        0,
+        "mul",
+    )
+    # TODO(vvchernov): min and max options are supported from 18 version, but CI supports 17 only
+    # # Scatter elements with min reduction of duplicates
+    # verify_scatter_elements(
+    #     (3, 3, 3),
+    #     [[[0, 2, 1], [1, 1, 1], [2, 1, 0]], [[0, 2, 1], [1, 1, 1], [2, 1, 0]]],
+    #     0,
+    #     "min",
+    # )
+    # # Scatter elements with max reduction of duplicates
+    # verify_scatter_elements(
+    #     (3, 3, 3),
+    #     [[[0, 2, 1], [1, 1, 1], [2, 1, 0]], [[0, 2, 1], [1, 1, 1], [2, 1, 0]]],
+    #     0,
+    #     "max",
+    # )
 
 
 @tvm.testing.parametrize_targets
@@ -3821,6 +3939,17 @@ def test_lppool(target, dev):
         auto_pad="SAME_UPPER",
     )
 
+    # Pool2D with empty stride
+    verify_lppool(
+        x_shape=[1, 3, 32, 32],
+        kernel_shape=[2, 2],
+        p=4,
+        strides=None,
+        pads=None,
+        out_shape=[1, 3, 32, 32],
+        auto_pad="SAME_LOWER",
+    )
+
     # Pool3D with stride
     verify_lppool(
         x_shape=[1, 1, 32, 32, 32],
@@ -5319,9 +5448,6 @@ unsupported_onnx_tests = [
     "test_cumsum_2d_negative_axis",
     "test_det_2d",
     "test_det_nd",
-    "test_dft",
-    "test_dft_axis",
-    "test_dft_inverse",
     "test_dropout_default",
     "test_dropout_default_mask",
     "test_dropout_default_mask_ratio",
@@ -5358,9 +5484,6 @@ unsupported_onnx_tests = [
     "test_reduce_sum_negative_axes_keepdims_example",
     "test_reduce_sum_negative_axes_keepdims_random",
     "test_roialign_aligned_true",
-    "test_scatter_elements_with_duplicate_indices",
-    "test_scatternd_add",
-    "test_scatternd_multiply",
     "test_sequence_insert_at_back",
     "test_sequence_insert_at_front",
     "test_sequence_map_add_1_sequence_1_tensor",
@@ -5484,6 +5607,9 @@ def test_onnx_nodes(target, dev, onnx_test):
         # satisfies onnx precision for bicubic interpolation
         atol = 1e-4
 
+    if "dft" in test_dir:
+        atol = 1e-3
+
     model = onnx.load(os.path.join(test_dir, "model.onnx"))
     for test_data_dir in glob.glob(os.path.join(test_dir, "test_data_set*")):
         inputs = []
@@ -5532,6 +5658,7 @@ def test_wrong_input():
         relay.frontend.from_onnx(model, shape=wrong_shape_dict)
 
 
+@pytest.mark.skip(reason="unsupported op numel")
 @tvm.testing.parametrize_targets
 def test_aten(target, dev):
     """test_aten"""
@@ -5724,7 +5851,7 @@ def test_biasgelu(target, dev, data_type, op_name):
     """test_biasgelu"""
     dtype = np.dtype(data_type)
     tensor_type = mapping.NP_TYPE_TO_TENSOR_TYPE[dtype]
-    absolute_tolerance = 1e-3 if data_type == "float16" else 1e-5
+    absolute_tolerance = 1e-2 if data_type == "float16" else 1e-5
 
     def verify_biasgelu(x, bias):
         node = onnx.helper.make_node(
@@ -5878,30 +6005,47 @@ def test_embedlayernormalization(target, dev):
 def test_attention(target, dev):
     """test_attention"""
 
-    def verify_attention(input_, weight, bias, mask_index, num_heads):
+    def verify_attention(_unidirectional, _input, _weight, _bias, _mask_index=None, _past=None):
+        input_names = ["input", "weight", "bias"]
+        if _mask_index is not None:
+            input_names.append("mask_index")
+        if _past is not None:
+            input_names.append("past")
+
         node = onnx.helper.make_node(
             "Attention",
-            inputs=["input", "weight", "bias", "mask_index"],
+            inputs=input_names,
             outputs=["output", "present"],
             domain="com.microsoft",
             num_heads=num_heads,
+            unidirectional=_unidirectional,
         )
 
+        past_shape = (2, batch_size, num_heads, past_sequence_length, head_size)
         present_output_shape = (2, batch_size, num_heads, sequence_length, head_size)
+
+        inputs_info = [
+            helper.make_tensor_value_info("input", TensorProto.FLOAT, list(_input.shape)),
+            helper.make_tensor_value_info("weight", TensorProto.FLOAT, list(_weight.shape)),
+            helper.make_tensor_value_info("bias", TensorProto.FLOAT, list(_bias.shape)),
+        ]
+        if _mask_index is not None:
+            inputs_info.append(
+                helper.make_tensor_value_info(
+                    "mask_index", TensorProto.INT32, list(_mask_index.shape)
+                ),
+            )
+        if _past is not None:
+            inputs_info.append(
+                helper.make_tensor_value_info("past", TensorProto.FLOAT, list(past_shape))
+            )
 
         graph = helper.make_graph(
             [node],
             "attention_test",
-            inputs=[
-                helper.make_tensor_value_info("input", TensorProto.FLOAT, list(input_.shape)),
-                helper.make_tensor_value_info("weight", TensorProto.FLOAT, list(weight.shape)),
-                helper.make_tensor_value_info("bias", TensorProto.FLOAT, list(bias.shape)),
-                helper.make_tensor_value_info(
-                    "mask_index", TensorProto.INT32, list(mask_index.shape)
-                ),
-            ],
+            inputs=inputs_info,
             outputs=[
-                helper.make_tensor_value_info("output", TensorProto.FLOAT, list(input_.shape)),
+                helper.make_tensor_value_info("output", TensorProto.FLOAT, list(_input.shape)),
                 helper.make_tensor_value_info(
                     "present", TensorProto.FLOAT, list(present_output_shape)
                 ),
@@ -5910,31 +6054,58 @@ def test_attention(target, dev):
 
         model = helper.make_model(graph, producer_name="attention_test")
 
+        inputs = [_input, _weight, _bias]
+        if _mask_index is not None:
+            inputs.append(_mask_index)
+        if _past is not None:
+            inputs.append(_past)
+
         # "present" output should be nullptr when the "past" input isn't included,
         # but ort requires an output shape to be specified?
         verify_with_ort_with_inputs(
             model,
-            [input_, weight, bias, mask_index],
-            [input_.shape, present_output_shape],
+            inputs,
+            [_input.shape, present_output_shape],
             target=target,
             dev=dev,
             rtol=1e-4,
             atol=1e-4,
         )
 
-    hidden_size = 384
-    batch_size = 4
-    sequence_length = 4
-    num_heads = 12
-    head_size = 32
+    batch_size = 11
+    num_heads = 13
+    head_size = 37
+    sequence_length = 7
+    input_hidden_size = 147
+    weight_hidden_size = num_heads * head_size
+    past_sequence_length = 17
 
-    dtype = "float32"
-    input_array = np.random.random((batch_size, sequence_length, hidden_size)).astype(dtype)
-    weight = np.random.normal(size=(hidden_size, 3 * hidden_size)).astype(dtype) * 0.1
-    bias = np.random.randn(3 * hidden_size).astype(dtype)
-    mask_index = np.full((batch_size, sequence_length), 1).astype("int32")
+    total_sequence_length = past_sequence_length + sequence_length
 
-    verify_attention(input_array, weight, bias, mask_index, num_heads)
+    # Required inputs
+    input_array = np.random.normal(size=(batch_size, sequence_length, input_hidden_size)).astype(
+        "float32"
+    )
+    weight = (
+        np.random.normal(size=(input_hidden_size, 3 * weight_hidden_size)).astype("float32") * 0.1
+    )
+    bias = np.random.randn(3 * weight_hidden_size).astype("float32")
+
+    # Optional inputs
+    past = np.random.random((2, batch_size, num_heads, past_sequence_length, head_size)).astype(
+        "float32"
+    )
+
+    for unidirectional in [0, 1]:
+        for have_past in [False, True]:
+            if not have_past:
+                mask_index = np.random.randint(0, 2, (batch_size, sequence_length)).astype("int32")
+                verify_attention(unidirectional, input_array, weight, bias, mask_index)
+            else:
+                mask_index = np.random.randint(0, 2, (batch_size, total_sequence_length)).astype(
+                    "int32"
+                )
+                verify_attention(unidirectional, input_array, weight, bias, mask_index, past)
 
 
 @tvm.testing.parametrize_targets
@@ -6167,6 +6338,174 @@ def test_skiplayernormalization(target, dev):
     bias = np.random.randn(hidden_size).astype(dtype)
 
     verify_skiplayernormalization(input_array, skip, gamma, beta, bias)
+
+
+@tvm.testing.known_failing_targets("cuda")
+@tvm.testing.parametrize_targets
+def test_qgemm(target, dev):
+    """test_qgemm"""
+
+    def verify_qgemm(
+        a_shape,
+        b_shape,
+        y_shape,
+        C=False,
+        y_zp=False,
+        b_per_tensor_quantization=False,
+        alpha=1.0,
+        transA=0,
+        transB=1,
+    ):
+        a_array = np.random.randint(low=0, high=255, size=a_shape).astype("uint8")
+        b_array = np.random.uniform(low=0, high=255, size=b_shape).astype("uint8")
+
+        input_nodes = [
+            helper.make_tensor_value_info("a", TensorProto.UINT8, list(a_shape)),
+            helper.make_tensor_value_info("b", TensorProto.UINT8, list(b_shape)),
+        ]
+
+        initializer = [
+            helper.make_tensor("a_scale", TensorProto.FLOAT, (), [np.random.rand()]),
+            helper.make_tensor("a_zero_point", TensorProto.UINT8, (), [np.random.randint(0, 255)]),
+        ]
+
+        input_names = [
+            "a",
+            "a_scale",
+            "a_zero_point",
+            "b",
+            "b_scale",
+            "b_zero_point",
+        ]
+        input_values = [a_array, b_array]
+
+        if b_per_tensor_quantization:
+            initializer.append(
+                helper.make_tensor("b_scale", TensorProto.FLOAT, (), [np.random.rand()])
+            )
+            initializer.append(
+                helper.make_tensor(
+                    "b_zero_point", TensorProto.UINT8, (), [np.random.randint(0, 255)]
+                )
+            )
+        else:  # per_colume_quantization
+            shape_value = b_shape[0] if transB else b_shape[1]
+            b_scale_array = np.random.random(shape_value).astype("float32")
+            w_zero_point_array = np.random.randint(0, 255, size=shape_value).astype("uint8")
+            initializer.append(
+                helper.make_tensor(
+                    "b_scale", TensorProto.FLOAT, list(b_scale_array.shape), b_scale_array
+                )
+            )
+            initializer.append(
+                helper.make_tensor(
+                    "b_zero_point",
+                    TensorProto.UINT8,
+                    list(w_zero_point_array.shape),
+                    w_zero_point_array,
+                )
+            )
+
+        output_tensor = helper.make_tensor_value_info("output", TensorProto.FLOAT, list(y_shape))
+
+        if C is True:
+            C_shape = (b_shape[0] if transB else b_shape[1],)
+            C_array = np.random.randint(low=0, high=65536, size=C_shape).astype("int32")
+            input_nodes.append(helper.make_tensor_value_info("C", TensorProto.INT32, list(C_shape)))
+            input_names.append("C")
+            input_values.append(C_array)
+
+        if y_zp is True:
+            input_names.append("y_scale")
+            initializer.append(
+                helper.make_tensor("y_scale", TensorProto.FLOAT, (), [np.random.rand()])
+            )
+
+            input_names.append("y_zero_point")
+            initializer.append(
+                helper.make_tensor(
+                    "y_zero_point", TensorProto.UINT8, (), [np.random.randint(0, 255)]
+                )
+            )
+
+            output_tensor = helper.make_tensor_value_info(
+                "output", TensorProto.UINT8, list(y_shape)
+            )
+
+        kwargs = {}
+        kwargs["alpha"] = alpha
+        kwargs["transA"] = transA
+        kwargs["transB"] = transB
+
+        node = helper.make_node(
+            "QGemm",
+            inputs=input_names,
+            outputs=["output"],
+            domain="com.microsoft",
+            # Default values for other attributes:
+            **kwargs,
+        )
+
+        graph = helper.make_graph(
+            [node],
+            "QGemm",
+            inputs=input_nodes,
+            outputs=[output_tensor],
+            initializer=initializer,
+        )
+        model = helper.make_model(
+            graph,
+            producer_name="QGemm",
+            opset_imports=[
+                onnx.helper.make_opsetid("com.microsoft", 1),
+            ],
+        )
+
+        verify_with_ort_with_inputs(model, input_values, target=target, dev=dev)
+
+    # B per tensor quantization
+    verify_qgemm(
+        (20, 30),
+        (50, 30),
+        (20, 50),
+        True,
+        True,
+        True,
+    )
+
+    # B per column  quantization
+    verify_qgemm(
+        (20, 30),
+        (50, 30),
+        (20, 50),
+        True,
+        True,
+        False,
+    )
+
+    # test alpha
+    verify_qgemm(
+        (20, 30),
+        (50, 30),
+        (20, 50),
+        True,
+        True,
+        True,
+        0.5,
+    )
+
+    # test transpose A
+    verify_qgemm(
+        (20, 50),
+        (20, 80),
+        (50, 80),
+        True,
+        True,
+        True,
+        0.5,
+        1,
+        0,
+    )
 
 
 @tvm.testing.known_failing_targets("cuda")
@@ -6663,6 +7002,190 @@ def test_qlinearsigmoid(target, dev):
     verify_qlinearsigmoid([])
 
 
+@tvm.testing.parametrize_targets
+def test_qlinearsoftmax(target, dev):
+    """test_qlinearsoftmax"""
+
+    def verify_qlinearsoftmax(a_shape):
+
+        _ = np.random.random(a_shape).astype("float32")
+
+        input_nodes = [helper.make_tensor_value_info("a", TensorProto.FLOAT, list(a_shape))]
+
+        node = helper.make_node("Softmax", ["a"], ["B"])
+        graph = helper.make_graph(
+            [node],
+            "qlinearsoftmax_test",
+            inputs=input_nodes,
+            outputs=[helper.make_tensor_value_info("B", TensorProto.FLOAT, list(a_shape))],
+        )
+        model = helper.make_model(graph, producer_name="qlinearsoftmax_test")
+        quantize_and_verify_with_ort(model, ["a"], [a_shape], target, dev)
+
+    verify_qlinearsoftmax([4, 2])
+    verify_qlinearsoftmax([5])
+    verify_qlinearsoftmax([3, 4, 5])
+
+
+@tvm.testing.parametrize_targets("llvm")
+def test_random_bernoulli(target, dev):
+    """test_random_bernoulli"""
+
+    def _get_tvm_output(
+        inputs,
+        out_dtype="int32",
+        seed=None,
+        target=target,
+        dev=dev,
+        use_vm=False,
+        freeze_params=False,
+    ):
+        def get_bernoulli_model(shape, in_dtype="float32", out_dtype="int32", seed=None):
+            onnx_itype = mapping.NP_TYPE_TO_TENSOR_TYPE[np.dtype(in_dtype)]
+            onnx_otype = mapping.NP_TYPE_TO_TENSOR_TYPE[np.dtype(out_dtype)]
+            node = helper.make_node(
+                "Bernoulli",
+                ["input"],
+                ["output"],
+            )
+            dtype_attr = helper.make_attribute("dtype", onnx_otype)
+            node.attribute.append(dtype_attr)
+            if seed is not None:
+                seed_attr = helper.make_attribute("seed", float(seed))
+                node.attribute.append(seed_attr)
+
+            graph = helper.make_graph(
+                [node],
+                "random_bernoulli_test",
+                inputs=[helper.make_tensor_value_info("input", onnx_itype, list(shape))],
+                outputs=[helper.make_tensor_value_info("output", onnx_otype, list(shape))],
+            )
+            return helper.make_model(graph, producer_name="random_bernoulli_test")
+
+        shape = inputs.shape
+        in_dtype = inputs.dtype
+        model = get_bernoulli_model(shape, in_dtype, out_dtype, seed)
+
+        if use_vm:
+            return get_tvm_output_with_vm(
+                model,
+                inputs,
+                target,
+                dev,
+                freeze_params=freeze_params,
+            )
+        else:
+            return get_tvm_output(
+                model,
+                inputs,
+                target,
+                dev,
+            )
+
+    def binom_test(input, ideal_mean, threshold=0.05):
+        # This test is strictly appropriate when input probabilities are all identical.
+        # In that case, it should lead to flaky failures in only one run in a million (p>=1e-6).
+        # The test should be over-conservative when input probabilities are not identical.
+        # (i.e., It should have a rate of flaky failures lower than one run in a million.)
+        # If this test starts repeatedly throwing flaky failures, consult a statistician
+        # in addition to your regular debugging.
+        bnm_test_res = scipy.stats.binomtest(
+            k=np.sum(input, dtype="int32"), n=len(input), p=ideal_mean
+        )
+        return bnm_test_res.pvalue > threshold
+
+    def verify_bernoulli(
+        inputs=None,
+        shape=[],
+        in_dtype="float32",
+        out_dtype="int32",
+        seed=None,
+        target=target,
+        dev=dev,
+        use_vm=False,
+        freeze_params=False,
+        in_out_equal=False,
+    ):
+        if inputs is None:
+            assert len(shape) != 0
+            inputs = np.random.uniform(size=shape).astype(in_dtype)
+
+        tvm_out = _get_tvm_output(
+            inputs,
+            out_dtype,
+            seed,
+            target,
+            dev,
+            use_vm,
+            freeze_params,
+        )
+
+        if isinstance(tvm_out, list):
+            tvm_out = tvm_out[0]
+        # check that values are 0 or 1
+        tvm_flat = tvm_out.flatten()
+        assert np.array_equal(tvm_flat, tvm_flat.astype("bool"))
+        if in_out_equal:
+            tvm.testing.assert_allclose(inputs, tvm_out)
+        else:
+            # check that mean value is close to the theoretical one by binomial test
+            ideal_mean = np.mean(inputs)
+            repeats = 3
+            check = False
+            for i in range(repeats):
+                if binom_test(tvm_flat, ideal_mean):
+                    check = True
+                    break
+                else:
+                    # repeat with new seed
+                    seed = np.random.randint(1e6)
+                    tvm_flat = _get_tvm_output(
+                        inputs,
+                        out_dtype,
+                        seed,
+                        target,
+                        dev,
+                        use_vm,
+                        freeze_params,
+                    ).flatten()
+            assert check, "Binomial test failed"
+
+    # Test input sequence of 0 and 1
+    inputs = np.random.randint(2, size=[10000]).astype("float32")
+    verify_bernoulli(inputs, in_out_equal=True)
+
+    # Binomial test input with 0.5 values
+    val_num = 10000
+    inputs = np.ones([val_num], dtype="float32") * 0.5
+    verify_bernoulli(inputs)
+
+    # Binomial test input with 0.1 values
+    inputs = np.ones([val_num], dtype="float32") * 0.1
+    verify_bernoulli(inputs)
+
+    # Simple test
+    verify_bernoulli(shape=[val_num])
+
+    # Floating output type
+    verify_bernoulli(shape=[val_num], out_dtype="float32")
+
+    # Double input type
+    verify_bernoulli(shape=[val_num], in_dtype="float64")
+
+    # Test N-D tensor generation
+    verify_bernoulli(shape=[2, 4, 100, 100])
+
+    # Test with seed
+    verify_bernoulli(shape=[val_num], seed=np.random.randint(1e6))
+
+    # Test result determinism with the same seeds
+    inputs = np.random.uniform(size=[val_num])
+    fixed_seed = np.random.randint(1e6)
+    tvm_out_1 = _get_tvm_output(inputs, seed=fixed_seed)
+    tvm_out_2 = _get_tvm_output(inputs, seed=fixed_seed)
+    tvm.testing.assert_allclose(tvm_out_1, tvm_out_2)
+
+
 @tvm.testing.parametrize_targets("llvm")
 def test_random_uniform(target, dev):
     """test_random_uniform"""
@@ -7097,6 +7620,156 @@ def test_convinteger(target, dev):
 
 
 @tvm.testing.parametrize_targets
+def test_bitshift(target, dev):
+    """test_bitshift"""
+
+    def verify_bitshift(in_shape, shift_shape, high=1000000000, in_dtype="uint64"):
+        in_shape = list(in_shape)
+        shift_shape = list(shift_shape)
+
+        # Create an input for each tensor.
+        tensor_values = [
+            np.random.randint(high, size=in_shape).astype(in_dtype),
+            np.random.randint(16, size=shift_shape).astype(in_dtype),
+            np.random.randint(16, size=shift_shape).astype(in_dtype),
+        ]
+
+        bitshift_left_node = helper.make_node(
+            "BitShift",
+            inputs=["input", "shift_left"],
+            outputs=["shifted"],
+            direction="LEFT",
+        )
+
+        bitshift_right_node = helper.make_node(
+            "BitShift",
+            inputs=["shifted", "shift_right"],
+            outputs=["output"],
+            direction="RIGHT",
+        )
+
+        # Create input and output tensors.
+        proto_type = mapping.NP_TYPE_TO_TENSOR_TYPE[np.dtype(in_dtype)]
+        graph_inputs = [
+            helper.make_tensor_value_info("input", proto_type, in_shape),
+            helper.make_tensor_value_info("shift_left", proto_type, shift_shape),
+            helper.make_tensor_value_info("shift_right", proto_type, shift_shape),
+        ]
+
+        graph_outputs = [helper.make_tensor_value_info("output", proto_type, in_shape)]
+
+        graph_nodes = [bitshift_left_node, bitshift_right_node]
+
+        graph = helper.make_graph(
+            graph_nodes,
+            "BitShift_test",
+            inputs=graph_inputs,
+            outputs=graph_outputs,
+        )
+        model = helper.make_model(
+            graph,
+            producer_name="BitShift_test",
+        )
+
+        verify_with_ort_with_inputs(model, tensor_values, target=target, dev=dev)
+
+    shape = (100, 4, 2)
+    broadcast_shape = (100, 1, 1)
+    # Common bitwise test
+    verify_bitshift(shape, shape)
+    # Bitwise test with broadcasting
+    verify_bitshift(shape, broadcast_shape)
+
+
+# TODO(vvchernov): return test back than ONNX Runtime in CI will support domain version of 18
+@pytest.mark.skip("Currently ONNX Runtime in CI does not support domain version of 18")
+@tvm.testing.parametrize_targets
+def test_bitwise(target, dev):
+    """test_bitwise"""
+
+    def verify_bitwise_ops(A_shape, B_shape, C_shape, D_shape, high=128, in_dtype="int32"):
+        A_shape = list(A_shape)
+        B_shape = list(B_shape)
+        C_shape = list(C_shape)
+        D_shape = list(D_shape)
+
+        # Create an input for each tensor.
+        tensor_values = [
+            np.random.randint(high, size=A_shape).astype(in_dtype),
+            np.random.randint(high, size=B_shape).astype(in_dtype),
+            np.random.randint(high, size=C_shape).astype(in_dtype),
+            np.random.randint(high, size=D_shape).astype(in_dtype),
+        ]
+
+        or_node = helper.make_node(
+            "BitwiseOr",
+            inputs=["A", "B"],
+            outputs=["OR"],
+        )
+
+        and_node = helper.make_node(
+            "BitwiseAnd",
+            inputs=["OR", "C"],
+            outputs=["AND"],
+        )
+
+        xor_node = helper.make_node(
+            "BitwiseXor",
+            inputs=["AND", "D"],
+            outputs=["XOR"],
+        )
+
+        not_node = helper.make_node(
+            "BitwiseNot",
+            inputs=["XOR"],
+            outputs=["output"],
+        )
+
+        # Create input and output tensors.
+        proto_type = mapping.NP_TYPE_TO_TENSOR_TYPE[np.dtype(in_dtype)]
+        graph_inputs = [
+            helper.make_tensor_value_info("A", proto_type, A_shape),
+            helper.make_tensor_value_info("B", proto_type, B_shape),
+            helper.make_tensor_value_info("C", proto_type, C_shape),
+            helper.make_tensor_value_info("D", proto_type, D_shape),
+        ]
+
+        graph_outputs = [
+            helper.make_tensor_value_info("output", proto_type, A_shape),
+        ]
+
+        graph_nodes = [
+            or_node,
+            and_node,
+            xor_node,
+            not_node,
+        ]
+
+        graph = helper.make_graph(
+            graph_nodes,
+            "Bitwise_test",
+            inputs=graph_inputs,
+            outputs=graph_outputs,
+        )
+        model = helper.make_model(
+            graph,
+            producer_name="Bitwise_test",
+        )
+
+        verify_with_ort_with_inputs(model, tensor_values, target=target, dev=dev)
+
+    shape = (100, 4, 2)
+    broadcast_shape = (100, 1, 1)
+    dtypes = ["int8", "uint8", "int32", "uint32"]
+    high_vals = [128, 128, 2147483648, 2147483648]
+    for high, dtype in zip(high_vals, dtypes):
+        # Common bitwise test
+        verify_bitwise_ops(shape, shape, shape, shape, high, dtype)
+        # Bitwise test with broadcasting
+        verify_bitwise_ops(shape, broadcast_shape, broadcast_shape, broadcast_shape, high, dtype)
+
+
+@tvm.testing.parametrize_targets
 def test_scan(target, dev):
     """test_scan"""
 
@@ -7306,6 +7979,78 @@ def test_linear_regressor(target, dev):
 
 
 @tvm.testing.parametrize_targets
+def test_dft(target, dev):
+    """test_dft"""
+
+    def verify_dft(
+        _axis,
+        _inverse,
+        _onesided,
+        _dft_length,
+        _input_shape,
+        _output_shape,
+    ):
+        input_names = ["input"]
+        if _dft_length is not None:
+            input_names.append("dft_length")
+
+        node = onnx.helper.make_node(
+            "DFT",
+            inputs=input_names,
+            outputs=["output"],
+            axis=_axis,
+            inverse=_inverse,
+            onesided=_onesided,
+        )
+
+        nodes = []
+        if _dft_length is not None:
+            nodes.append(
+                make_constant_node("dft_length", TensorProto.INT32, [], [_dft_length]),
+            )
+        nodes.append(node)
+
+        graph = helper.make_graph(
+            nodes,
+            "dft_test",
+            inputs=[
+                helper.make_tensor_value_info("input", TensorProto.FLOAT, _input_shape),
+            ],
+            outputs=[
+                helper.make_tensor_value_info("output", TensorProto.FLOAT, _output_shape),
+            ],
+        )
+
+        model = helper.make_model(graph, producer_name="dft_test")
+
+        _input = np.random.normal(size=_input_shape).astype("float32")
+        verify_with_ort_with_inputs(
+            model,
+            [_input],
+            [_input_shape],
+            target=target,
+            dev=dev,
+            rtol=1e-4,
+            atol=1e-4,
+            use_vm=False,
+        )
+
+    batch_size = 5
+    n = 2
+    D = 7
+
+    for axis in list(range(1, n)) + [-2]:
+        for inverse, onesided in [(0, 0), (0, 1), (1, 0)]:
+            for n_fft in [D, D - 1, D + 1]:
+                for c in [1, 2]:
+                    input_shape = [batch_size] + n * [D] + [c]
+                    output_shape = [batch_size] + n * [D] + [2]
+                    if onesided == 1:
+                        output_shape[axis] = output_shape[axis] // 2 + 1
+                    verify_dft(axis, inverse, onesided, n_fft, input_shape, output_shape)
+
+
+@tvm.testing.parametrize_targets
 def test_sequence(target, dev):
     """test_sequence"""
 
@@ -7337,10 +8082,17 @@ def test_sequence(target, dev):
             outputs=["inserted_sequence"],
         )
 
+        # Test sequence erase.
+        erase_node = helper.make_node(
+            "SequenceErase",
+            inputs=["inserted_sequence", "position"],
+            outputs=["erased_sequence"],
+        )
+
         # Test sequence concatenation.
         concat_node = helper.make_node(
             "ConcatFromSequence",
-            inputs=["inserted_sequence"],
+            inputs=["erased_sequence"],
             outputs=["concat_sequence"],
             axis=axis,
         )
@@ -7350,8 +8102,14 @@ def test_sequence(target, dev):
             "SplitToSequence", inputs=["concat_sequence"], outputs=["split_sequence"], axis=axis
         )
 
+        # Test tensor extraction from sequence
         at_node = helper.make_node(
             "SequenceAt", inputs=["split_sequence", "position"], outputs=["output"]
+        )
+
+        # Test sequence length
+        length_node = helper.make_node(
+            "SequenceLength", inputs=["split_sequence"], outputs=["output_2"]
         )
 
         if new_axis is not None:
@@ -7371,9 +8129,21 @@ def test_sequence(target, dev):
             output_shape[axis] = num_tensors + 1
         else:
             output_shape[axis] = (num_tensors + 1) * output_shape[axis]
-        graph_outputs = [helper.make_tensor_value_info("output", TensorProto.FLOAT, output_shape)]
+        graph_outputs = [
+            helper.make_tensor_value_info("output", TensorProto.FLOAT, output_shape),
+            helper.make_tensor_value_info("output_2", TensorProto.INT64, []),
+        ]
 
-        graph_nodes = [position_node, construct_node, insert_node, concat_node, split_node, at_node]
+        graph_nodes = [
+            position_node,
+            construct_node,
+            insert_node,
+            erase_node,
+            concat_node,
+            split_node,
+            at_node,
+            length_node,
+        ]
 
         graph = helper.make_graph(
             graph_nodes,
@@ -7392,6 +8162,38 @@ def test_sequence(target, dev):
     verify_sequence_ops((3, 3, 3, 3), 4, position=3)
     verify_sequence_ops((3, 3, 3, 3), 4, axis=2)
     verify_sequence_ops((3, 3, 3, 3), 4, axis=2, new_axis=1)
+
+
+@tvm.testing.parametrize_targets
+def test_empty_sequence(target, dev):
+    """test_empty_sequence"""
+
+    # Test creating an empty tensor sequence.
+    empty_node = helper.make_node(
+        "SequenceEmpty",
+        inputs=[],
+        outputs=["empty_sequence"],
+    )
+
+    length_node = helper.make_node("SequenceLength", inputs=["empty_sequence"], outputs=["output"])
+
+    graph_outputs = [helper.make_tensor_value_info("output", TensorProto.INT64, [])]
+
+    graph_nodes = [empty_node, length_node]
+
+    graph = helper.make_graph(
+        graph_nodes,
+        "Sequence_empty_test",
+        inputs=[],
+        outputs=graph_outputs,
+    )
+
+    model = helper.make_model(
+        graph,
+        producer_name="Sequence_empty_test",
+    )
+
+    verify_with_ort_with_inputs(model, [], target=target, dev=dev)
 
 
 def test_exporting_node_renamed_model():
@@ -7696,6 +8498,36 @@ class TestSetSpan:
             return infer_type(relay.Function([a, b], matmul_out))
 
         self._verify(_res, _golden)
+
+
+@tvm.testing.parametrize_targets
+def test_pad_constant_value(target, dev):
+    """test_pad_constant_value"""
+
+    def verify_pad_constant_value(constant_value):
+        tensor_shape = [1, 2, 257, 126]
+        tensor_values = [np.random.uniform(size=tensor_shape).astype("float32")]
+        graph_inputs = [helper.make_tensor_value_info("input", TensorProto.FLOAT, tensor_shape)]
+        graph_outputs = [helper.make_tensor_value_info("output", TensorProto.FLOAT, None)]
+        pads = helper.make_tensor("pads", TensorProto.INT64, [8], [0, 0, 0, 2, 0, 0, 0, 0])
+        pad_node = helper.make_node(
+            "Pad", ["input", "pads", constant_value], ["output"], mode="constant"
+        )
+        graph_nodes = [pad_node]
+        graph = helper.make_graph(
+            graph_nodes,
+            "test_pad_constant_value",
+            inputs=graph_inputs,
+            outputs=graph_outputs,
+            initializer=[pads],
+        )
+        model = helper.make_model(
+            graph,
+            producer_name="test_pad_constant_value",
+        )
+        verify_with_ort_with_inputs(model, tensor_values, target=target, dev=dev)
+
+    verify_pad_constant_value("")
 
 
 if __name__ == "__main__":

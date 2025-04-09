@@ -25,15 +25,17 @@ from tvm.tir.tensor_intrin.cuda import *
 from tvm.target import Target
 from tvm.target.codegen import llvm_lookup_intrinsic_id
 
+from tvm.tir.tensor_intrin.x86 import VNNI_DOT_16x4_INTRIN as VNNI_INTRIN
+
 
 # fmt: off
 @tvm.script.ir_module
 class Dense:
     @T.prim_func
     def main(
-        p0: T.Buffer[(128, 128), "float32"],
-        p1: T.Buffer[(128, 128), "float32"],
-        T_matmul_NT: T.Buffer[(128, 128), "float32"],
+        p0: T.Buffer((128, 128), "float32"),
+        p1: T.Buffer((128, 128), "float32"),
+        T_matmul_NT: T.Buffer((128, 128), "float32"),
     ) -> None:
         # function attr dict
         T.func_attr({"layout_free_buffers": [1], "tir.noalias": True, "global_symbol": "main"})
@@ -54,9 +56,9 @@ class Dense:
 class DenseAdd:
     @T.prim_func
     def main(
-        p0: T.Buffer[(128, 128), "float32"],
-        p1: T.Buffer[(128, 128), "float32"],
-        T_add: T.Buffer[(128, 128), "float32"],
+        p0: T.Buffer((128, 128), "float32"),
+        p1: T.Buffer((128, 128), "float32"),
+        T_add: T.Buffer((128, 128), "float32"),
     ) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True, "layout_free_buffers": [1]})
@@ -90,9 +92,9 @@ class DenseAdd:
 class DenseAdd_scheduled_cpu:
     @T.prim_func
     def main(
-        p0: T.Buffer[(128, 128), "float32"],
-        p1: T.Buffer[(128, 128), "float32"],
-        T_add: T.Buffer[(128, 128), "float32"],
+        p0: T.Buffer((128, 128), "float32"),
+        p1: T.Buffer((128, 128), "float32"),
+        T_add: T.Buffer((128, 128), "float32"),
     ) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True, "layout_free_buffers": [1]})
@@ -172,7 +174,7 @@ class DenseAdd_scheduled_cpu:
 @tvm.script.ir_module
 class DenseAdd_cpu_no_write_cache:
     @T.prim_func
-    def main(p0: T.Buffer[(128, 128), "float32"], p1: T.Buffer[(128, 128), "float32"], T_add: T.Buffer[(128, 128), "float32"]) -> None:
+    def main(p0: T.Buffer((128, 128), "float32"), p1: T.Buffer((128, 128), "float32"), T_add: T.Buffer((128, 128), "float32")) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True, "layout_free_buffers": [1]})
         # body
@@ -190,7 +192,7 @@ class DenseAdd_cpu_no_write_cache:
             for i0_2_init, i1_2_init, i0_3_init in T.grid(4, 4, 2):
                 for i1_3_fused_init in T.vectorized(32):
                     with T.block("T_matmul_NT_init"):
-                        i = T.axis.spatial(128, i0_0_i1_0_i0_1_i1_1_fused // 4 * 32 + i0_0_i1_0_i0_1_i1_1_fused % 4 * 8 + i0_2_init * 2 + i0_3_init)
+                        i = T.axis.spatial(128, i0_0_i1_0_i0_1_i1_1_fused * 8 + i0_2_init * 2 + i0_3_init)
                         j = T.axis.spatial(128, i1_2_init * 32 + i1_3_fused_init)
                         T.reads()
                         T.writes(T_matmul_NT[i, j])
@@ -199,7 +201,7 @@ class DenseAdd_cpu_no_write_cache:
             for i2_0, i0_2, i1_2, i2_1, i0_3 in T.grid(8, 4, 4, 16, 2):
                 for i1_3_fused in T.vectorized(32):
                     with T.block("T_matmul_NT_update"):
-                        i = T.axis.spatial(128, i0_0_i1_0_i0_1_i1_1_fused // 4 * 32 + i0_0_i1_0_i0_1_i1_1_fused % 4 * 8 + i0_2 * 2 + i0_3)
+                        i = T.axis.spatial(128, i0_0_i1_0_i0_1_i1_1_fused * 8 + i0_2 * 2 + i0_3)
                         j = T.axis.spatial(128, i1_2 * 32 + i1_3_fused)
                         k = T.axis.reduce(128, i2_0 * 16 + i2_1)
                         T.reads(T_matmul_NT[i, j], p0[i, k], p1_global[k // 16, j // 32, k % 16, j % 32])
@@ -219,9 +221,9 @@ class DenseAdd_cpu_no_write_cache:
 class DenseAdd_scheduled_gpu:
     @T.prim_func
     def main(
-        p0: T.Buffer[(128, 128), "float32"],
-        p1: T.Buffer[(128, 128), "float32"],
-        T_add: T.Buffer[(128, 128), "float32"],
+        p0: T.Buffer((128, 128), "float32"),
+        p1: T.Buffer((128, 128), "float32"),
+        T_add: T.Buffer((128, 128), "float32"),
     ) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True, "layout_free_buffers": [1]})
@@ -248,10 +250,10 @@ class DenseAdd_scheduled_gpu:
                             )
                             j = T.axis.spatial(
                                 128,
-                                i1_4_init
-                                + i0_0_i1_0_fused % 4 * 32
+                                i0_0_i1_0_fused % 4 * 32
                                 + i0_2_i1_2_fused % 8 * 4
-                                + i1_3_init,
+                                + i1_3_init
+                                + i1_4_init,
                             )
                             T.reads()
                             T.writes(T_matmul_NT_local[i, j])
@@ -337,10 +339,10 @@ class DenseAdd_scheduled_gpu:
                                 )
                                 j = T.axis.spatial(
                                     128,
-                                    i1_4
-                                    + i0_0_i1_0_fused % 4 * 32
+                                    i0_0_i1_0_fused % 4 * 32
                                     + i0_2_i1_2_fused % 8 * 4
-                                    + i1_3,
+                                    + i1_3
+                                    + i1_4,
                                 )
                                 k = T.axis.reduce(128, i2_0 * 4 + i2_1 * 4 + i2_2)
                                 T.reads(T_matmul_NT_local[i, j], p0_shared[i, k], p1_shared[j, k])
@@ -372,7 +374,7 @@ class DenseAdd_scheduled_gpu:
 @tvm.script.ir_module
 class Conv2dInt8:
     @T.prim_func
-    def main(p0: T.Buffer[(16, 56, 56, 64), "int8"], p1: T.Buffer[(256, 1, 1, 64), "int8"], p2: T.Buffer[(1, 1, 1, 256), "int32"], p3: T.Buffer[(1, 1, 1, 256), "int32"], p4: T.Buffer[(1, 1, 1, 256), "int64"], p5: T.Buffer[(1, 1, 1, 256), "int64"], p6: T.Buffer[(1, 1, 1, 256), "int64"], p7: T.Buffer[(), "int32"], p8: T.Buffer[1, "int32"], compute: T.Buffer[(16, 56, 56, 256), "int32"]) -> None:
+    def main(p0: T.Buffer((16, 56, 56, 64), "int8"), p1: T.Buffer((256, 1, 1, 64), "int8"), p2: T.Buffer((1, 1, 1, 256), "int32"), p3: T.Buffer((1, 1, 1, 256), "int32"), p4: T.Buffer((1, 1, 1, 256), "int64"), p5: T.Buffer((1, 1, 1, 256), "int64"), p6: T.Buffer((1, 1, 1, 256), "int64"), p7: T.Buffer((), "int32"), p8: T.Buffer(1, "int32"), compute: T.Buffer((16, 56, 56, 256), "int32")) -> None:
         # function attr dict
         T.func_attr({"tir.noalias": True, "global_symbol": "main"})
         # body
@@ -488,7 +490,7 @@ class Conv2dInt8:
 @tvm.script.ir_module
 class Conv2dInt8_target:
     @T.prim_func
-    def main(p0: T.Buffer[(16, 56, 56, 64), "int8"], p1: T.Buffer[(256, 1, 1, 64), "int8"], p2: T.Buffer[(1, 1, 1, 256), "int32"], p3: T.Buffer[(1, 1, 1, 256), "int32"], p4: T.Buffer[(1, 1, 1, 256), "int64"], p5: T.Buffer[(1, 1, 1, 256), "int64"], p6: T.Buffer[(1, 1, 1, 256), "int64"], p7: T.Buffer[(), "int32"], p8: T.Buffer[1, "int32"], p9: T.Buffer[(16, 56, 56, 256), "int32"], compute: T.Buffer[(16, 56, 56, 256), "uint8"]) -> None:
+    def main(p0: T.Buffer((16, 56, 56, 64), "int8"), p1: T.Buffer((256, 1, 1, 64), "int8"), p2: T.Buffer((1, 1, 1, 256), "int32"), p3: T.Buffer((1, 1, 1, 256), "int32"), p4: T.Buffer((1, 1, 1, 256), "int64"), p5: T.Buffer((1, 1, 1, 256), "int64"), p6: T.Buffer((1, 1, 1, 256), "int64"), p7: T.Buffer((), "int32"), p8: T.Buffer(1, "int32"), p9: T.Buffer((16, 56, 56, 256), "int32"), compute: T.Buffer((16, 56, 56, 256), "uint8")) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True})
         # body
@@ -632,29 +634,29 @@ class Conv2dInt8_target:
 @tvm.script.ir_module
 class Conv2dInt8_tensorcore_scheduled:
     @T.prim_func
-    def main(p0: T.Buffer[(16, 56, 56, 64), "int8"], p1: T.Buffer[(256, 1, 1, 64), "int8"], p2: T.Buffer[(1, 1, 1, 256), "int32"], p3: T.Buffer[(1, 1, 1, 256), "int32"], p4: T.Buffer[(1, 1, 1, 256), "int64"], p5: T.Buffer[(1, 1, 1, 256), "int64"], p6: T.Buffer[(1, 1, 1, 256), "int64"], p7: T.Buffer[(), "int32"], p8: T.Buffer[1, "int32"], p9: T.Buffer[(16, 56, 56, 256), "int32"], compute: T.Buffer[(16, 56, 56, 256), "uint8"]) -> None:
+    def main(p0: T.Buffer((16, 56, 56, 64), "int8"), p1: T.Buffer((256, 1, 1, 64), "int8"), p2: T.Buffer((1, 1, 1, 256), "int32"), p3: T.Buffer((1, 1, 1, 256), "int32"), p4: T.Buffer((1, 1, 1, 256), "int64"), p5: T.Buffer((1, 1, 1, 256), "int64"), p6: T.Buffer((1, 1, 1, 256), "int64"), p7: T.Buffer((), "int32"), p8: T.Buffer(1, "int32"), p9: T.Buffer((16, 56, 56, 256), "int32"), compute: T.Buffer((16, 56, 56, 256), "uint8")) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True})
-        A_s0 = T.var("int32")
-        A_s0_1 = T.var("int32")
-        A_s0_2 = T.var("int32")
-        A_s0_3 = T.var("int32")
-        A_s1 = T.var("int32")
-        A_s1_1 = T.var("int32")
-        A_s1_2 = T.var("int32")
-        A_s1_3 = T.var("int32")
-        B_s0 = T.var("int32")
-        B_s1 = T.var("int32")
-        C_s0 = T.var("int32")
-        C_s0_1 = T.var("int32")
-        C_s0_2 = T.var("int32")
-        C_s0_3 = T.var("int32")
-        C_s0_4 = T.var("int32")
-        C_s1 = T.var("int32")
-        C_s1_1 = T.var("int32")
-        C_s1_2 = T.var("int32")
-        C_s1_3 = T.var("int32")
-        C_s1_4 = T.var("int32")
+        A_s0 = T.int32()
+        A_s0_1 = T.int32()
+        A_s0_2 = T.int32()
+        A_s0_3 = T.int32()
+        A_s1 = T.int32()
+        A_s1_1 = T.int32()
+        A_s1_2 = T.int32()
+        A_s1_3 = T.int32()
+        B_s0 = T.int32()
+        B_s1 = T.int32()
+        C_s0 = T.int32()
+        C_s0_1 = T.int32()
+        C_s0_2 = T.int32()
+        C_s0_3 = T.int32()
+        C_s0_4 = T.int32()
+        C_s1 = T.int32()
+        C_s1_1 = T.int32()
+        C_s1_2 = T.int32()
+        C_s1_3 = T.int32()
+        C_s1_4 = T.int32()
         # body
         # with T.block("root")
         conv2d_nhwc_reindex_shared = T.alloc_buffer([50176, 256], dtype="int32", scope="shared")
@@ -669,7 +671,7 @@ class Conv2dInt8_tensorcore_scheduled:
                     for ax2_0_3_init, ax3_0_3_init, ax2_0_4_init, ax3_0_4_init in T.grid(1, 1, 1, 1):
                         with T.block("conv2d_nhwc_o_init"):
                             v2_o = T.axis.spatial(3136, ax2_0_0_ax3_0_0_fused // 8 * 8 + ax2_0_2_ax3_0_2_fused // 2 + ax2_0_3_init + ax2_0_4_init)
-                            v3_o = T.axis.spatial(16, ax3_0_4_init + ax2_0_0_ax3_0_0_fused % 8 * 2 + ax2_0_2_ax3_0_2_fused % 2 + ax3_0_3_init)
+                            v3_o = T.axis.spatial(16, ax2_0_0_ax3_0_0_fused % 8 * 2 + ax2_0_2_ax3_0_2_fused % 2 + ax3_0_3_init + ax3_0_4_init)
                             T.reads()
                             T.writes(conv2d_nhwc_reindex_shared_wmma_accumulator[v2_o * 16 : v2_o * 16 + 16, v3_o * 16 : v3_o * 16 + 16])
                             T.block_attr({"meta_schedule.thread_extent_high_inclusive":1024, "meta_schedule.thread_extent_low_inclusive":32, "warp_execution":1})
@@ -720,10 +722,10 @@ class Conv2dInt8_tensorcore_scheduled:
                                     T.tvm_load_matrix_sync(C_2.data, 16, 16, 16, C_2.elem_offset // C_s0_2 // 16 * (C_s0_2 // 16) + C_2.elem_offset % C_s0_2 // 16, T.tvm_access_ptr(T.type_annotation(dtype="int8"), A_1.data, A_1.elem_offset, A_s0_1 * 16, 1, dtype="handle"), A_s0_1, "col_major", dtype="handle")
                             for ax2_0_3, ax3_0_3, ax0_2, ax1_2, ax4_0_2, ax2_0_4, ax3_0_4 in T.grid(1, 1, 1, 1, 2, 1, 1):
                                 with T.block("conv2d_nhwc_o_update"):
-                                    v0 = T.axis.reduce(1, ax0_2 + ax0_0 + ax0_1)
-                                    v1 = T.axis.reduce(1, ax1_1 + ax1_2 + ax1_0)
+                                    v0 = T.axis.reduce(1, ax0_0 + ax0_1 + ax0_2)
+                                    v1 = T.axis.reduce(1, ax1_0 + ax1_1 + ax1_2)
                                     v2_o = T.axis.spatial(3136, ax2_0_0_ax3_0_0_fused // 8 * 8 + ax2_0_2_ax3_0_2_fused // 2 + ax2_0_3 + ax2_0_4)
-                                    v3_o = T.axis.spatial(16, ax3_0_4 + ax2_0_0_ax3_0_0_fused % 8 * 2 + ax2_0_2_ax3_0_2_fused % 2 + ax3_0_3)
+                                    v3_o = T.axis.spatial(16, ax2_0_0_ax3_0_0_fused % 8 * 2 + ax2_0_2_ax3_0_2_fused % 2 + ax3_0_3 + ax3_0_4)
                                     v4_o = T.axis.reduce(4, ax4_0_0 * 2 + ax4_0_1 * 2 + ax4_0_2)
                                     T.reads(conv2d_nhwc_reindex_shared_wmma_accumulator[v2_o * 16 : v2_o * 16 + 16, v3_o * 16 : v3_o * 16 + 16], pad_temp_reindex_shared_wmma_matrix_a[v2_o * 16 : v2_o * 16 + 16, v4_o * 16 : v4_o * 16 + 16], p1_reindex_shared_wmma_matrix_b[v0, v1, v3_o * 16 : v3_o * 16 + 16, v4_o * 16 : v4_o * 16 + 16])
                                     T.writes(conv2d_nhwc_reindex_shared_wmma_accumulator[v2_o * 16 : v2_o * 16 + 16, v3_o * 16 : v3_o * 16 + 16])
@@ -754,7 +756,7 @@ class Conv2dInt8_tensorcore_scheduled:
 @tvm.script.ir_module
 class Conv2dInt8_NCHWc:
     @T.prim_func
-    def main(p0: T.Buffer[(1, 32, 7, 7, 16), "uint8"], p1: T.Buffer[(128, 32, 1, 1, 4, 16, 4), "int8"], p2: T.Buffer[(1, 128, 1, 1, 16), "int32"], p3: T.Buffer[(1, 128, 1, 1, 16), "float32"], p4: T.Buffer[1, "float32"], p5: T.Buffer[(1, 128, 7, 7, 16), "int32"], compute: T.Buffer[(1, 128, 7, 7, 16), "uint8"]) -> None:
+    def main(p0: T.Buffer((1, 32, 7, 7, 16), "uint8"), p1: T.Buffer((128, 32, 1, 1, 4, 16, 4), "int8"), p2: T.Buffer((1, 128, 1, 1, 16), "int32"), p3: T.Buffer((1, 128, 1, 1, 16), "float32"), p4: T.Buffer(1, "float32"), p5: T.Buffer((1, 128, 7, 7, 16), "int32"), compute: T.Buffer((1, 128, 7, 7, 16), "uint8")) -> None:
         # function attr dict
         T.func_attr({"tir.noalias": True, "global_symbol": "main"})
         # body
@@ -917,7 +919,7 @@ class Conv2dInt8_NCHWc:
 @tvm.script.ir_module
 class Conv2dInt8_NCHWc_target:
     @T.prim_func
-    def main(p0: T.Buffer[(1, 32, 7, 7, 16), "uint8"], p1: T.Buffer[(128, 32, 1, 1, 4, 16, 4), "int8"], p2: T.Buffer[(1, 128, 1, 1, 16), "int32"], p3: T.Buffer[(1, 128, 1, 1, 16), "float32"], p4: T.Buffer[1, "float32"], p5: T.Buffer[(1, 128, 7, 7, 16), "uint8"], T_cast: T.Buffer[(1, 128, 7, 7, 16), "int32"]) -> None:
+    def main(p0: T.Buffer((1, 32, 7, 7, 16), "uint8"), p1: T.Buffer((128, 32, 1, 1, 4, 16, 4), "int8"), p2: T.Buffer((1, 128, 1, 1, 16), "int32"), p3: T.Buffer((1, 128, 1, 1, 16), "float32"), p4: T.Buffer(1, "float32"), p5: T.Buffer((1, 128, 7, 7, 16), "uint8"), T_cast: T.Buffer((1, 128, 7, 7, 16), "int32")) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True})
         # body
@@ -1135,7 +1137,7 @@ def get_conv2d_vnni_mod(intrin_id):
     @tvm.script.ir_module
     class Conv2dInt8_NCHWc_scheduled:
         @T.prim_func
-        def main(p0: T.Buffer[(1, 32, 7, 7, 16), "uint8"], p1: T.Buffer[(128, 32, 1, 1, 4, 16, 4), "int8"], p2: T.Buffer[(1, 128, 1, 1, 16), "int32"], p3: T.Buffer[(1, 128, 1, 1, 16), "float32"], p4: T.Buffer[1, "float32"], p5: T.Buffer[(1, 128, 7, 7, 16), "uint8"], T_cast: T.Buffer[(1, 128, 7, 7, 16), "int32"]) -> None:
+        def main(p0: T.Buffer((1, 32, 7, 7, 16), "uint8"), p1: T.Buffer((128, 32, 1, 1, 4, 16, 4), "int8"), p2: T.Buffer((1, 128, 1, 1, 16), "int32"), p3: T.Buffer((1, 128, 1, 1, 16), "float32"), p4: T.Buffer(1, "float32"), p5: T.Buffer((1, 128, 7, 7, 16), "uint8"), T_cast: T.Buffer((1, 128, 7, 7, 16), "int32")) -> None:
             # function attr dict
             T.func_attr({"global_symbol": "main", "tir.noalias": True})
             # body
@@ -1145,11 +1147,11 @@ def get_conv2d_vnni_mod(intrin_id):
                 for i2_1, i3_1, i4_0_1 in T.grid(7, 1, 1):
                     for i0_2_init, i1_2_init, i2_2_init, i3_2_init, i4_0_2_init, i0_3_init, i1_3_init, i2_3_init, i3_3_init, i4_0_3_init in T.grid(1, 1, 1, 1, 1, 1, 1, 1, 7, 1):
                         with T.block("conv2d_NCHWc_int8_o_init"):
-                            n = T.axis.spatial(1, i0_3_init + i0_2_init)
-                            oc_chunk = T.axis.spatial(128, i1_2_init + i1_3_init + i0_0_i1_0_i2_0_i3_0_i4_0_0_i0_1_i1_1_fused // 32 * 32 + i0_0_i1_0_i2_0_i3_0_i4_0_0_i0_1_i1_1_fused % 32)
+                            n = T.axis.spatial(1, i0_2_init + i0_3_init)
+                            oc_chunk = T.axis.spatial(128, i0_0_i1_0_i2_0_i3_0_i4_0_0_i0_1_i1_1_fused + i1_2_init + i1_3_init)
                             oh = T.axis.spatial(7, i2_1 + i2_2_init + i2_3_init)
                             ow = T.axis.spatial(7, i3_1 * 7 + i3_2_init * 7 + i3_3_init)
-                            oc_block_o = T.axis.spatial(1, i4_0_3_init + i4_0_1 + i4_0_2_init)
+                            oc_block_o = T.axis.spatial(1, i4_0_1 + i4_0_2_init + i4_0_3_init)
                             T.reads()
                             T.writes(conv2d_NCHWc_int8[n, oc_chunk, oh, ow, 0 : 16])
                             for i4_1 in T.vectorized(16):
@@ -1160,15 +1162,15 @@ def get_conv2d_vnni_mod(intrin_id):
                                     conv2d_NCHWc_int8[n, oc_chunk, oh, ow, oc_block_i_init] = 0
                     for i5_0, i6_0, i7_0, i8_0, i9_0_0, i0_2, i1_2, i2_2, i3_2, i4_0_2, i5_1, i6_1, i7_1, i8_1, i9_0_1, i0_3, i1_3, i2_3, i3_3, i4_0_3 in T.grid(1, 1, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 8, 1, 1, 1, 1, 1, 7, 1):
                         with T.block("conv2d_NCHWc_int8_o_update"):
-                            n = T.axis.spatial(1, i0_3 + i0_2)
-                            oc_chunk = T.axis.spatial(128, i1_2 + i1_3 + i0_0_i1_0_i2_0_i3_0_i4_0_0_i0_1_i1_1_fused // 32 * 32 + i0_0_i1_0_i2_0_i3_0_i4_0_0_i0_1_i1_1_fused % 32)
+                            n = T.axis.spatial(1, i0_2 + i0_3)
+                            oc_chunk = T.axis.spatial(128,  i0_0_i1_0_i2_0_i3_0_i4_0_0_i0_1_i1_1_fused + i1_2 + i1_3)
                             oh = T.axis.spatial(7, i2_1 + i2_2 + i2_3)
                             ow = T.axis.spatial(7, i3_1 * 7 + i3_2 * 7 + i3_3)
-                            oc_block_o = T.axis.spatial(1, i4_0_3 + i4_0_1 + i4_0_2)
+                            oc_block_o = T.axis.spatial(1, i4_0_1 + i4_0_2 + i4_0_3)
                             kh = T.axis.reduce(1, i5_0 + i5_1)
-                            kw = T.axis.reduce(1, i6_1 + i6_0)
+                            kw = T.axis.reduce(1, i6_0 + i6_1)
                             ic_outer = T.axis.reduce(32, i7_0 * 8 + i7_1)
-                            ic_f_inner = T.axis.reduce(4, i8_1 + i8_0)
+                            ic_f_inner = T.axis.reduce(4, i8_0 + i8_1)
                             ic_s_inner_o = T.axis.reduce(1, i9_0_0 + i9_0_1)
                             T.reads(conv2d_NCHWc_int8[n, oc_chunk, oh, ow, 0 : 16], p0[n, ic_outer, oh + kh, ow + kw, ic_f_inner * 4 : ic_f_inner * 4 + 4], p1[oc_chunk, ic_outer, kh, kw, ic_f_inner, 0 : 16, 0 : 4])
                             T.writes(conv2d_NCHWc_int8[n, oc_chunk, oh, ow, 0 : 16])
@@ -1180,12 +1182,12 @@ def get_conv2d_vnni_mod(intrin_id):
                             B_i8x64: T.int8x64 = B[0, 0:64]
                             B_i32x16: T.int32x16 = T.reinterpret(B_i8x64, dtype="int32x16")
                             C_i32x16: T.int32x16 = C[0:16]
-                            C[0:16] = T.call_llvm_pure_intrin(T.uint32(intrin_id), T.uint32(0), C_i32x16, T.broadcast(A_i32, 16), B_i32x16, dtype="int32x16")
+                            C[0:16] = T.call_llvm_pure_intrin(T.uint32(intrin_id), T.uint32(3), C_i32x16, T.broadcast(A_i32, 16), B_i32x16, dtype="int32x16")
                     for ax0, ax1, ax2, ax3 in T.grid(1, 1, 1, 7):
                         for ax4_fused in T.vectorized(16):
                             with T.block("T_cast_8"):
                                 ax0_1 = T.axis.spatial(1, ax0)
-                                ax1_1 = T.axis.spatial(128, i0_0_i1_0_i2_0_i3_0_i4_0_0_i0_1_i1_1_fused // 32 * 32 + i0_0_i1_0_i2_0_i3_0_i4_0_0_i0_1_i1_1_fused % 32 + ax1)
+                                ax1_1 = T.axis.spatial(128, i0_0_i1_0_i2_0_i3_0_i4_0_0_i0_1_i1_1_fused + ax1)
                                 ax2_1 = T.axis.spatial(7, i2_1 + ax2)
                                 ax3_1, ax4 = T.axis.remap("SS", [ax3, ax4_fused])
                                 T.reads(conv2d_NCHWc_int8[ax0_1, ax1_1, ax2_1, ax3_1, ax4], p2[ax0_1, ax1_1, 0, 0, ax4], p3[ax0_1, ax1_1, 0, 0, ax4], p4[0], p5[ax0_1, ax1_1, ax2_1, ax3_1, ax4])
@@ -1198,7 +1200,7 @@ def get_conv2d_vnni_mod(intrin_id):
 @tvm.script.ir_module
 class Conv2dWinogradAddRelu:
     @T.prim_func
-    def main(p0: T.Buffer[(1, 56, 56, 64), "float32"], p1: T.Buffer[(6, 6, 64, 64), "float32"], p2: T.Buffer[(1, 1, 1, 64), "float32"], T_relu: T.Buffer[(1, 56, 56, 64), "float32"]) -> None:
+    def main(p0: T.Buffer((1, 56, 56, 64), "float32"), p1: T.Buffer((6, 6, 64, 64), "float32"), p2: T.Buffer((1, 1, 1, 64), "float32"), T_relu: T.Buffer((1, 56, 56, 64), "float32")) -> None:
         # function attr dict
         T.func_attr({"layout_free_buffers": [1], "tir.noalias": True, "global_symbol": "main"})
         # body
@@ -1290,7 +1292,7 @@ class Conv2dWinogradAddRelu:
 @tvm.script.ir_module
 class Conv2dWinogradAddResidualRelu:
     @T.prim_func
-    def main(p0: T.Buffer[(1, 56, 56, 64), "float32"], p1: T.Buffer[(6, 6, 64, 64), "float32"], p2: T.Buffer[(1, 1, 1, 64), "float32"], p3: T.Buffer[(1, 56, 56, 64), "float32"], T_relu: T.Buffer[(1, 56, 56, 64), "float32"]) -> None:
+    def main(p0: T.Buffer((1, 56, 56, 64), "float32"), p1: T.Buffer((6, 6, 64, 64), "float32"), p2: T.Buffer((1, 1, 1, 64), "float32"), p3: T.Buffer((1, 56, 56, 64), "float32"), T_relu: T.Buffer((1, 56, 56, 64), "float32")) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True, "layout_free_buffers": [1]})
         # body
@@ -1389,7 +1391,7 @@ class Conv2dWinogradAddResidualRelu:
 @tvm.script.ir_module
 class Conv2dWinogradAddResidualRelu_scheduled:
     @T.prim_func
-    def main(p0: T.Buffer[(1, 56, 56, 64), "float32"], p1: T.Buffer[(6, 6, 64, 64), "float32"], p2: T.Buffer[(1, 1, 1, 64), "float32"], p3: T.Buffer[(1, 56, 56, 64), "float32"], T_relu: T.Buffer[(1, 56, 56, 64), "float32"]) -> None:
+    def main(p0: T.Buffer((1, 56, 56, 64), "float32"), p1: T.Buffer((6, 6, 64, 64), "float32"), p2: T.Buffer((1, 1, 1, 64), "float32"), p3: T.Buffer((1, 56, 56, 64), "float32"), T_relu: T.Buffer((1, 56, 56, 64), "float32")) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True, "layout_free_buffers": [1]})
         # body
@@ -1438,10 +1440,10 @@ class Conv2dWinogradAddResidualRelu_scheduled:
                 for i0_2_i1_2_i2_2_i3_2_fused in T.thread_binding(48, thread="threadIdx.x"):
                     for i0_3_init, i1_3_init, i2_3_init, i3_3_init, i0_4_init, i1_4_init, i2_4_init, i3_4_init in T.grid(1, 1, 14, 1, 1, 1, 1, 1):
                         with T.block("bgemm_init"):
-                            eps = T.axis.spatial(6, i0_4_init + i0_1_i1_1_i2_1_i3_1_fused // 2 * 3 + i0_2_i1_2_i2_2_i3_2_fused // 16 + i0_3_init)
-                            nu = T.axis.spatial(6, i1_4_init + i0_0_i1_0_i2_0_i3_0_fused // 28 + i1_3_init)
+                            eps = T.axis.spatial(6, i0_1_i1_1_i2_1_i3_1_fused // 2 * 3 + i0_2_i1_2_i2_2_i3_2_fused // 16 + i0_3_init + i0_4_init)
+                            nu = T.axis.spatial(6, i0_0_i1_0_i2_0_i3_0_fused // 28 + i1_3_init + i1_4_init)
                             p = T.axis.spatial(196, i0_0_i1_0_i2_0_i3_0_fused % 28 // 4 * 28 + i0_1_i1_1_i2_1_i3_1_fused % 2 * 14 + i2_3_init + i2_4_init)
-                            co = T.axis.spatial(64, i3_4_init + i0_0_i1_0_i2_0_i3_0_fused % 4 * 16 + i0_2_i1_2_i2_2_i3_2_fused % 16 + i3_3_init)
+                            co = T.axis.spatial(64, i0_0_i1_0_i2_0_i3_0_fused % 4 * 16 + i0_2_i1_2_i2_2_i3_2_fused % 16 + i3_3_init + i3_4_init)
                             T.reads()
                             T.writes(bgemm_local[eps, nu, p, co])
                             T.block_attr({"layout_free_placeholders":[], "meta_schedule.thread_extent_high_inclusive":1024, "meta_schedule.thread_extent_low_inclusive":32, "meta_schedule.tiling_structure":"SSSRRSRS"})
@@ -1471,10 +1473,10 @@ class Conv2dWinogradAddResidualRelu_scheduled:
                                         p1_shared[v0, v1, v2, v3] = p1[v0, v1, v2, v3]
                         for i4_1, i0_3, i1_3, i2_3, i3_3, i4_2, i0_4, i1_4, i2_4, i3_4 in T.grid(2, 1, 1, 14, 1, 16, 1, 1, 1, 1):
                             with T.block("bgemm_update"):
-                                eps = T.axis.spatial(6, i0_4 + i0_1_i1_1_i2_1_i3_1_fused // 2 * 3 + i0_2_i1_2_i2_2_i3_2_fused // 16 + i0_3)
-                                nu = T.axis.spatial(6, i1_4 + i0_0_i1_0_i2_0_i3_0_fused // 28 + i1_3)
+                                eps = T.axis.spatial(6, i0_1_i1_1_i2_1_i3_1_fused // 2 * 3 + i0_2_i1_2_i2_2_i3_2_fused // 16 + i0_3 + i0_4)
+                                nu = T.axis.spatial(6, i0_0_i1_0_i2_0_i3_0_fused // 28 + i1_3 + i1_4)
                                 p = T.axis.spatial(196, i0_0_i1_0_i2_0_i3_0_fused % 28 // 4 * 28 + i0_1_i1_1_i2_1_i3_1_fused % 2 * 14 + i2_3 + i2_4)
-                                co = T.axis.spatial(64, i3_4 + i0_0_i1_0_i2_0_i3_0_fused % 4 * 16 + i0_2_i1_2_i2_2_i3_2_fused % 16 + i3_3)
+                                co = T.axis.spatial(64, i0_0_i1_0_i2_0_i3_0_fused % 4 * 16 + i0_2_i1_2_i2_2_i3_2_fused % 16 + i3_3 + i3_4)
                                 ci = T.axis.reduce(64, i4_0 * 32 + i4_1 * 16 + i4_2)
                                 T.reads(bgemm_local[eps, nu, p, co], data_pack_shared[eps, nu, p, ci], p1_shared[eps, nu, co, ci])
                                 T.writes(bgemm_local[eps, nu, p, co])
@@ -1529,7 +1531,7 @@ class Conv2dWinogradAddResidualRelu_scheduled:
 @tvm.script.ir_module
 class Conv2dInt8_with_predicate:
     @T.prim_func
-    def main(p0: T.Buffer[(16, 56, 56, 64), "int8"], p1: T.Buffer[(256, 1, 1, 64), "int8"], p2: T.Buffer[(1, 1, 1, 256), "int32"], p3: T.Buffer[(1, 1, 1, 256), "int32"], p4: T.Buffer[256, "int32"], p5: T.Buffer[256, "int32"], p6: T.Buffer[256, "int32"], p7: T.Buffer[(), "int32"], p8: T.Buffer[1, "int32"], compute: T.Buffer[(16, 56, 56, 256), "int32"]) -> None:
+    def main(p0: T.Buffer((16, 56, 56, 64), "int8"), p1: T.Buffer((256, 1, 1, 64), "int8"), p2: T.Buffer((1, 1, 1, 256), "int32"), p3: T.Buffer((1, 1, 1, 256), "int32"), p4: T.Buffer(256, "int32"), p5: T.Buffer(256, "int32"), p6: T.Buffer(256, "int32"), p7: T.Buffer((), "int32"), p8: T.Buffer(1, "int32"), compute: T.Buffer((16, 56, 56, 256), "int32")) -> None:
         # function attr dict
         T.func_attr({"tir.noalias": True, "global_symbol": "main"})
         # body
@@ -1603,7 +1605,7 @@ class Conv2dInt8_with_predicate:
 @tvm.script.ir_module
 class Conv2dInt8_with_predicate_target:
     @T.prim_func
-    def main(p0: T.Buffer[(16, 56, 56, 64), "int8"], p1: T.Buffer[(256, 1, 1, 64), "int8"], p2: T.Buffer[(1, 1, 1, 256), "int32"], p3: T.Buffer[(1, 1, 1, 256), "int32"], p4: T.Buffer[256, "int32"], p5: T.Buffer[256, "int32"], p6: T.Buffer[256, "int32"], p7: T.Buffer[(), "int32"], p8: T.Buffer[1, "int32"], p9: T.Buffer[(16, 56, 56, 256), "int32"], compute: T.Buffer[(16, 56, 56, 256), "int32"]) -> None:
+    def main(p0: T.Buffer((16, 56, 56, 64), "int8"), p1: T.Buffer((256, 1, 1, 64), "int8"), p2: T.Buffer((1, 1, 1, 256), "int32"), p3: T.Buffer((1, 1, 1, 256), "int32"), p4: T.Buffer(256, "int32"), p5: T.Buffer(256, "int32"), p6: T.Buffer(256, "int32"), p7: T.Buffer((), "int32"), p8: T.Buffer(1, "int32"), p9: T.Buffer((16, 56, 56, 256), "int32"), compute: T.Buffer((16, 56, 56, 256), "int32")) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True})
         # body
@@ -1698,7 +1700,7 @@ class Conv2dInt8_with_predicate_target:
 @tvm.script.ir_module
 class Conv2dInt8_with_predicate_scheduled:
     @T.prim_func
-    def main(p0: T.Buffer[(16, 56, 56, 64), "int8"], p1: T.Buffer[(256, 1, 1, 64), "int8"], p2: T.Buffer[(1, 1, 1, 256), "int32"], p3: T.Buffer[(1, 1, 1, 256), "int32"], p4: T.Buffer[256, "int32"], p5: T.Buffer[256, "int32"], p6: T.Buffer[256, "int32"], p7: T.Buffer[(), "int32"], p8: T.Buffer[1, "int32"], p9: T.Buffer[(16, 56, 56, 256), "int32"], compute: T.Buffer[(16, 56, 56, 256), "int32"]) -> None:
+    def main(p0: T.Buffer((16, 56, 56, 64), "int8"), p1: T.Buffer((256, 1, 1, 64), "int8"), p2: T.Buffer((1, 1, 1, 256), "int32"), p3: T.Buffer((1, 1, 1, 256), "int32"), p4: T.Buffer(256, "int32"), p5: T.Buffer(256, "int32"), p6: T.Buffer(256, "int32"), p7: T.Buffer((), "int32"), p8: T.Buffer(1, "int32"), p9: T.Buffer((16, 56, 56, 256), "int32"), compute: T.Buffer((16, 56, 56, 256), "int32")) -> None:
         # function attr dict
         T.func_attr({"global_symbol": "main", "tir.noalias": True})
         # body
@@ -1741,7 +1743,7 @@ class Conv2dInt8_with_predicate_scheduled:
                                         v1_o = T.axis.spatial(4, ax4_0_0 * 2 + ax4_0_1 + ax1_0_1)
                                         T.reads(pad_temp_reindex_shared[v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16])
                                         T.writes(pad_temp_reindex_shared_wmma_matrix_a[v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16])
-                                        T.block_attr({"meta_schedule.auto_tensorize":"wmma_load_16x16x16_s8_a"})
+                                        T.block_attr({"meta_schedule.auto_tensorize":"wmma_load_16x16x16_s8_a_shared"})
                                         for ax0_1_1, ax1_1_1 in T.grid(16, 16):
                                             with T.block("pad_temp_reindex_shared_wmma.matrix_a"):
                                                 v0_i, v1_i = T.axis.remap("SS", [ax0_1_1, ax1_1_1])
@@ -1755,7 +1757,7 @@ class Conv2dInt8_with_predicate_scheduled:
                                         v3_o = T.axis.spatial(4, ax4_0_0 * 2 + ax4_0_1 + ax3_0)
                                         T.reads(p1_reindex_shared[v0, v1, v2_o * 16 : v2_o * 16 + 16, v3_o * 16 : v3_o * 16 + 16])
                                         T.writes(p1_reindex_shared_wmma_matrix_b[v0, v1, v2_o * 16 : v2_o * 16 + 16, v3_o * 16 : v3_o * 16 + 16])
-                                        T.block_attr({"meta_schedule.auto_tensorize":"wmma_load_16x16x16_s8_b_trans"})
+                                        T.block_attr({"meta_schedule.auto_tensorize":"wmma_load_16x16x16_s8_b_trans_shared"})
                                         for ax2_1, ax3_1 in T.grid(16, 16):
                                             with T.block("p1_reindex_shared_wmma.matrix_b"):
                                                 v2_i, v3_i = T.axis.remap("SS", [ax2_1, ax3_1])
@@ -1764,8 +1766,8 @@ class Conv2dInt8_with_predicate_scheduled:
                                                 p1_reindex_shared_wmma_matrix_b[v0, v1, v2_o * 16 + v2_i, v3_o * 16 + v3_i] = p1_reindex_shared[v0, v1, v2_o * 16 + v2_i, v3_o * 16 + v3_i]
                                 for ax2_0_3, ax3_0_3, ax0_2, ax1_2, ax4_0_2, ax2_0_4, ax3_0_4 in T.grid(1, 1, 1, 1, 1, 1, 2):
                                     with T.block("conv2d_nhwc_o"):
-                                        v0 = T.axis.reduce(1, ax0_2 + ax0_0 + ax0_1)
-                                        v1 = T.axis.reduce(1, ax1_1 + ax1_2 + ax1_0)
+                                        v0 = T.axis.reduce(1, ax0_0 + ax0_1 + ax0_2)
+                                        v1 = T.axis.reduce(1, ax1_0 + ax1_1 + ax1_2)
                                         v2_o = T.axis.spatial(3136, ax2_0_0_ax3_0_0_fused // 4 * 392 + ax2_0_1_ax3_0_1_fused * 2 + ax2_0_2_ax3_0_2_fused // 2 + ax2_0_3 + ax2_0_4)
                                         v3_o = T.axis.spatial(16, ax2_0_0_ax3_0_0_fused % 4 * 4 + ax2_0_2_ax3_0_2_fused % 2 * 2 + ax3_0_3 * 2 + ax3_0_4)
                                         v4_o = T.axis.reduce(4, ax4_0_0 * 2 + ax4_0_1 + ax4_0_2)
@@ -2148,7 +2150,7 @@ def test_conv2d_int8_tensorcore():
         l28, l29 = sch.split(loop=l21, factors=[None, 16], preserve_unit_iters=True)
         l30, l31, l32, l33, l34, l35, l36, l37 = sch.get_loops(block=b1)
         sch.reorder(l34, l36, l29, l27, l25)
-        b38 = sch.blockize(loop=l29)
+        b38 = sch.blockize(target=l29)
         sch.annotate(
             block_or_loop=b38,
             ann_key="meta_schedule.auto_tensorize",
@@ -2241,7 +2243,7 @@ def test_conv2d_int8_tensorcore():
         l95, l96 = sch.split(loop=l91, factors=[None, 16], preserve_unit_iters=True)
         l97, l98, l99, l100, l101, l102, l103 = sch.get_loops(block=b86)
         sch.reorder(l102, l96, l94)
-        b104 = sch.blockize(loop=l96)
+        b104 = sch.blockize(target=l96)
         sch.annotate(
             block_or_loop=b104,
             ann_key="meta_schedule.auto_tensorize",
@@ -2306,11 +2308,11 @@ def test_conv2d_int8_tensorcore():
             l157,
         ) = sch.get_loops(block=b129)
         sch.reorder(l156, l144, l142)
-        b158 = sch.blockize(loop=l144)
+        b158 = sch.blockize(target=l144)
         sch.annotate(
             block_or_loop=b158,
             ann_key="meta_schedule.auto_tensorize",
-            ann_val="wmma_load_16x16x16_s8_a",
+            ann_val="wmma_load_16x16x16_s8_a_shared",
         )
         b159 = sch.cache_read(block=b38, read_buffer_index=1, storage_scope="wmma.matrix_b")
         sch.compute_at(block=b159, loop=l80, preserve_unit_loops=True, index=-1)
@@ -2349,11 +2351,11 @@ def test_conv2d_int8_tensorcore():
             l191,
         ) = sch.get_loops(block=b159)
         sch.reorder(l190, l176, l174)
-        b192 = sch.blockize(loop=l176)
+        b192 = sch.blockize(target=l176)
         sch.annotate(
             block_or_loop=b192,
             ann_key="meta_schedule.auto_tensorize",
-            ann_val="wmma_load_16x16x16_s8_b_trans",
+            ann_val="wmma_load_16x16x16_s8_b_trans_shared",
         )
         sch.compute_inline(block=b17)
         sch.compute_inline(block=b18)
@@ -2488,10 +2490,10 @@ def test_conv2d_int8_tensorcore():
         sch.tensorize(block_or_loop=b314, tensor_intrin="wmma_fill_16x16x16_s32")
         b315 = sch.get_block(name="pad_temp_reindex_shared_wmma.matrix_a_o", func_name="main")
         sch.unannotate(block_or_loop=b315, ann_key="meta_schedule.auto_tensorize")
-        sch.tensorize(block_or_loop=b315, tensor_intrin="wmma_load_16x16x16_s8_a")
+        sch.tensorize(block_or_loop=b315, tensor_intrin="wmma_load_16x16x16_s8_a_shared")
         b316 = sch.get_block(name="p1_reindex_shared_wmma.matrix_b_o", func_name="main")
         sch.unannotate(block_or_loop=b316, ann_key="meta_schedule.auto_tensorize")
-        sch.tensorize(block_or_loop=b316, tensor_intrin="wmma_load_16x16x16_s8_b_trans")
+        sch.tensorize(block_or_loop=b316, tensor_intrin="wmma_load_16x16x16_s8_b_trans_shared")
         b317 = sch.get_block(name="conv2d_nhwc_o_update", func_name="main")
         sch.unannotate(block_or_loop=b317, ann_key="meta_schedule.auto_tensorize")
         sch.tensorize(block_or_loop=b317, tensor_intrin="wmma_sync_16x16x16_s8s8s32_trans")
@@ -2552,10 +2554,8 @@ def test_conv2d_int8_vnni():
         l34, l35 = sch.split(loop=l26, factors=[None, 16], preserve_unit_iters=True)
         l36, l37, l38, l39, l40, l41, l42, l43, l44, l45, l46, l47 = sch.get_loops(block=b1)
         sch.reorder(l42, l43, l44, l45, l46, l35, l33)
-        b48 = sch.blockize(loop=l35)
-        sch.annotate(
-            block_or_loop=b48, ann_key="meta_schedule.auto_tensorize", ann_val="dot_16x4_vnni"
-        )
+        b48 = sch.blockize(target=l35)
+        sch.annotate(block_or_loop=b48, ann_key="meta_schedule.auto_tensorize", ann_val=VNNI_INTRIN)
         l49, l50, l51, l52, l53, l54, l55, l56, l57, l58 = sch.get_loops(block=b48)
         v59, v60, v61, v62 = sch.sample_perfect_tile(
             loop=l49, n=4, max_innermost_factor=64, decision=[1, 1, 1, 1]
@@ -2729,7 +2729,7 @@ def test_conv2d_int8_vnni():
         sch.vectorize(loop=l193)
         b194 = sch.get_block(name="conv2d_NCHWc_int8_o_update", func_name="main")
         sch.unannotate(block_or_loop=b194, ann_key="meta_schedule.auto_tensorize")
-        sch.tensorize(block_or_loop=b194, tensor_intrin="dot_16x4_vnni")
+        sch.tensorize(block_or_loop=b194, tensor_intrin=VNNI_INTRIN)
 
     vnni_id = llvm_lookup_intrinsic_id("llvm.x86.avx512.vpdpbusd.512")
     verify(
@@ -3119,7 +3119,7 @@ def test_inline_order():
         l22, l23 = sch.split(loop=l15, factors=[None, 16], preserve_unit_iters=True)
         l24, l25, l26, l27, l28, l29, l30, l31 = sch.get_loops(block=b1)
         sch.reorder(l28, l30, l23, l21, l19)
-        b32 = sch.blockize(loop=l23)
+        b32 = sch.blockize(target=l23)
         sch.annotate(
             block_or_loop=b32,
             ann_key="meta_schedule.auto_tensorize",
@@ -3212,7 +3212,7 @@ def test_inline_order():
         l89, l90 = sch.split(loop=l85, factors=[None, 16], preserve_unit_iters=True)
         l91, l92, l93, l94, l95, l96, l97 = sch.get_loops(block=b80)
         sch.reorder(l96, l90, l88)
-        b98 = sch.blockize(loop=l90)
+        b98 = sch.blockize(target=l90)
         sch.annotate(
             block_or_loop=b98,
             ann_key="meta_schedule.auto_tensorize",
@@ -3277,11 +3277,11 @@ def test_inline_order():
             l151,
         ) = sch.get_loops(block=b123)
         sch.reorder(l150, l138, l136)
-        b152 = sch.blockize(loop=l138)
+        b152 = sch.blockize(target=l138)
         sch.annotate(
             block_or_loop=b152,
             ann_key="meta_schedule.auto_tensorize",
-            ann_val="wmma_load_16x16x16_s8_a",
+            ann_val="wmma_load_16x16x16_s8_a_shared",
         )
         b153 = sch.cache_read(block=b32, read_buffer_index=1, storage_scope="wmma.matrix_b")
         sch.compute_at(block=b153, loop=l74, preserve_unit_loops=True, index=-1)
@@ -3320,11 +3320,11 @@ def test_inline_order():
             l185,
         ) = sch.get_loops(block=b153)
         sch.reorder(l184, l170, l168)
-        b186 = sch.blockize(loop=l170)
+        b186 = sch.blockize(target=l170)
         sch.annotate(
             block_or_loop=b186,
             ann_key="meta_schedule.auto_tensorize",
-            ann_val="wmma_load_16x16x16_s8_b_trans",
+            ann_val="wmma_load_16x16x16_s8_b_trans_shared",
         )
         sch.compute_inline(block=b11)
         sch.compute_inline(block=b12)

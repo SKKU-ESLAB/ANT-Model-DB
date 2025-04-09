@@ -1458,6 +1458,10 @@ template <>
 struct Type2Str<TVMArgValue> {
   static std::string v() { return "TVMArgValue"; }
 };
+template <>
+struct Type2Str<TVMByteArray> {
+  static std::string v() { return "TVMByteArray"; }
+};
 template <typename FType>
 struct Type2Str<TypedPackedFunc<FType>> {
   static std::string v() { return SignaturePrinter<function_signature<FType>>::F(); }
@@ -1938,7 +1942,7 @@ inline TVMRetValue::operator T() const {
   return PackedFuncValueConverter<T>::From(*this);
 }
 
-inline PackedFunc Module::GetFunction(const std::string& name, bool query_imports) {
+inline PackedFunc Module::GetFunction(const String& name, bool query_imports) {
   return (*this)->GetFunction(name, query_imports);
 }
 

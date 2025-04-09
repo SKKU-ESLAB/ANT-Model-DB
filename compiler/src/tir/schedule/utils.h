@@ -22,6 +22,7 @@
 #include <tvm/arith/analyzer.h>
 #include <tvm/arith/int_set.h>
 #include <tvm/arith/iter_affine_map.h>
+#include <tvm/node/serialization.h>
 #include <tvm/tir/analysis.h>
 #include <tvm/tir/function.h>
 #include <tvm/tir/op.h>
@@ -30,6 +31,7 @@
 #include <tvm/tir/schedule/state.h>
 #include <tvm/tir/schedule/trace.h>
 #include <tvm/tir/stmt_functor.h>
+#include <tvm/tir/utils.h>
 
 #include <string>
 #include <unordered_map>
@@ -38,7 +40,6 @@
 
 #include "../../arith/pattern_match.h"
 #include "../../node/attr_registry.h"
-#include "../../printer/text_printer.h"
 #include "../../runtime/thread_storage_scope.h"
 #include "../../support/array.h"
 #include "../../support/nd_int_set.h"
@@ -50,76 +51,6 @@
 
 namespace tvm {
 namespace tir {
-
-/*!
- * \brief A helper macro to convert an sref to the statement it points to,
- * then check if the downcasting succeeded.
- * \param Result The result variable, used for checking
- * \param SRef The SRef to be cast
- * \param Type The type to be cast to, can be Block or For
- */
-#define TVM_SREF_AS_OR_ERR(Result, SRef, Type) \
-  SRef->StmtAs<Type>();                        \
-  ICHECK(Result)
-
-/*!
- * \brief A helper macro to convert an sref to the block it points to,
- *
- * Throws an internal error if downcasting fails.  The variable name
- * in the parent scope is used for the error message.
- *
- * \param SRef The SRef to be cast
- */
-#define TVM_SREF_TO_BLOCK(SRef)                                                                    \
-  [&]() {                                                                                          \
-    auto result = TVM_SREF_AS_OR_ERR(result, (SRef), ::tvm::tir::BlockNode)                        \
-                  << "TypeError: Expects StmtSRef `" << #SRef << "` points to `Block`, but gets: " \
-                  << ((SRef)->stmt ? (SRef)->stmt->GetTypeKey() : "None");                         \
-    return result;                                                                                 \
-  }()
-
-/*!
- * \brief A helper macro to convert an sref to the for-loop it points to
- *
- * Throws an internal error if downcasting fails.  The variable name
- * in the parent scope is used for the error message.
- *
- * \param SRef The SRef to be cast
- */
-#define TVM_SREF_TO_FOR(SRef)                                                                     \
-  [&]() {                                                                                         \
-    auto result = TVM_SREF_AS_OR_ERR(result, (SRef), ::tvm::tir::ForNode)                         \
-                  << "TypeError: Expects StmtSRef `" << #SRef << "` points to `Loop`, but gets: " \
-                  << ((SRef)->stmt ? (SRef)->stmt->GetTypeKey() : "None");                        \
-    return result;                                                                                \
-  }()
-
-/*!
- * \brief Downcast a TVM ObjectRef to its corresponding container using `ObjectRef::as<Type>`,
- * then check if the downcasting succeeded.
- * \param Result The result variable, used for checking
- * \param From The ObjectRef to be downcast
- * \param Type The type to be downcast to
- */
-#define TVM_TYPE_AS_OR_ERR(Result, From, Type) \
-  From.as<Type>();                             \
-  ICHECK(Result)
-
-/*!
- * \brief Downcast a TVM ObjectRef to its corresponding container using `ObjectRef::as<Type>`,
- * throwing an internal error if downcast fails.
- * \param Result The result variable, used for checking
- * \param From The ObjectRef to be downcast
- * \param Type The type to be downcast to
- */
-#define TVM_TYPE_AS(From, Type)                                                               \
-  [&]() {                                                                                     \
-    auto result = TVM_TYPE_AS_OR_ERR(result, (From), Type)                                    \
-                  << "TypeError: Expects `" << #From << "` to have type `" << Type::_type_key \
-                  << "`, but gets: " << ((From).defined() ? (From)->GetTypeKey() : "None");   \
-    return result;                                                                            \
-  }()
-
 /*!
  * \brief Convert an array of loop StmtSRefs to an array of loops
  * \param loop_srefs The loop StmtSRefs to be converted
@@ -456,10 +387,12 @@ inline std::unordered_set<std::string> GetBlockNames(const IRModule& mod) {
     std::unordered_set<std::string> block_names;
   };
 
-  auto prim_func = tir::FindEntryFunc(mod, nullptr);
-  BlockNameCollector collector;
-  collector(prim_func->body);
-  return collector.block_names;
+  if (auto prim_func = tir::FindEntryFunc(mod, nullptr)) {
+    BlockNameCollector collector;
+    collector(prim_func->body);
+    return collector.block_names;
+  }
+  return {};
 }
 
 /*! \brief Query if the given block name exists in the module associated with the schedule */
@@ -487,6 +420,14 @@ Array<ObjectRef> TranslateInputRVs(const Array<ObjectRef>& inputs,
  */
 void TranslateAddOutputRVs(const Array<ObjectRef>& old_outputs, const Array<ObjectRef>& new_outputs,
                            std::unordered_map<const Object*, const Object*>* rv_map);
+
+/*!
+ * \brief Counts the number of trace instructions.
+ * \param insts The instructions representing a trace.
+ * \param remove_postproc If postprocessing instructions are removed.
+ * \return Number of instructions.
+ */
+int GetNumValidInstructions(const Array<Instruction>& insts, bool remove_postproc);
 
 }  // namespace tir
 }  // namespace tvm

@@ -177,6 +177,19 @@ TVM_DLL Pass RewriteUnsafeSelect();
 TVM_DLL Pass Simplify();
 
 /*!
+ * \brief Convert an IRModule to be SSA form.
+ *
+ * This pass handles cases where the same tir::Var appears in
+ * multiple functions within the same module.  For example, after
+ * extracting a fragment from one function into another, where the
+ * same `tir::Var` may be defined both as within the body of the
+ * original function, and as a parameter within the hoisted function.
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass ConvertSSA();
+
+/*!
  * \brief Instruments bound checkers.
  *
  * \return The pass.
@@ -251,11 +264,49 @@ TVM_DLL Pass LowerCustomDatatypes();
 TVM_DLL Pass DecorateDeviceScope();
 
 /*!
+ * \brief Annotate locations that should be run on the device
+ *
+ * Insert `AttrStmt` nodes specifying a target on which regions within
+ * the PrimFunc should be executed.  Only modifies functions that have
+ * a `tvm::attr::kTarget` attribute, and where that target defines a
+ * host.
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass AnnotateDeviceRegions();
+
+/*!
  * \brief Split the function into a host function and device functions.
+ *
+ * The resulting host-side function will keep the same
+ * `tvm::attr::kTarget` attribute (e.g. `T.target("cuda",
+ * host=T.target("llvm"))`).  This ensures that `MakePackedAPI` knows
+ * which device type should be used for the input buffers.
+ *
+ * The resulting device-side function will
+ * have the host stripped from its target attribute
+ * (e.g. `T.target("cuda")`).
  *
  * \return The pass.
  */
 TVM_DLL Pass SplitHostDevice();
+
+/*!
+ * \brief Lower cross-device function calls.
+ *
+ * Prior to this pass, host to device calls are represented as
+ * subroutine calls, with environment parameters (e.g. env_thread)
+ * specified internally.  The device function is an internal function,
+ * without a `tvm::attr::kGlobalSymbol` attribute.
+ *
+ * After this pass, host to device calls are represented as
+ * tvm_call_packed built-in.  The device function is an
+ * externally-exposed function, with a non-empty
+ * `tvm::attr::kGlobalSymbol` attribute.
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass LowerDeviceKernelLaunch();
 
 /*!
  * \brief skip assert stmt.
@@ -337,11 +388,31 @@ TVM_DLL Pass CombineContextCall();
 TVM_DLL Pass NarrowDataType(int target_bits);
 
 /*!
- * \brief Legalize bf16 typed Ops. Add a cast to fp32
+ * \brief Legalize bf16 compute Ops. Add a cast to fp32
  *   before Ops, then add a cast back to bf16.
  * \return The pass.
  */
-TVM_DLL Pass BF16Legalize();
+TVM_DLL Pass BF16ComputeLegalize();
+
+/*!
+ * \brief Legalize fp8 compute Ops. Add a cast to fp16/fp32
+ *   before Ops, then add a cast back to fp8.
+ * \param promote_dtype_str The data type used for type promotion, defaults to float16
+ * \return The pass.
+ */
+TVM_DLL Pass FP8ComputeLegalize(String promote_dtype_str = "float16");
+
+/*!
+ * \brief Legalize bf16 storage types to u16.
+ * \return The pass.
+ */
+TVM_DLL Pass BF16StorageLegalize();
+
+/*!
+ * \brief Legalize fp8 storage types to u8.
+ * \return The pass.
+ */
+TVM_DLL Pass FP8StorageLegalize();
 
 /*!
  * \brief Rewrite the pointer content type of arguments,
@@ -437,10 +508,11 @@ TVM_DLL Pass ConvertBlocksToOpaque();
  *
  *  \endcode
  *
- *
+ * \param is_strict ensure the compacted shape always smaller than the original shape.
+ *   otherwise it allows to grow the shape to match actual accessed buffer regions.
  * \return The pass.
  */
-TVM_DLL Pass CompactBufferAllocation();
+TVM_DLL Pass CompactBufferAllocation(bool is_strict = true);
 
 /*!
  * This pass legalizes packed calls by wrapping their arguments into TVMValues
@@ -576,7 +648,7 @@ TVM_DLL Pass UnifiedStaticMemoryPlanner();
  *
  * \code{.py}
  * @T.prim_func
- * def before_transform(A: T.Buffer[(16, 16), "float32"], C: T.Buffer[(16, 16), "float32"]) -> None:
+ * def before_transform(A: T.Buffer((16, 16), "float32"), C: T.Buffer((16, 16), "float32")) -> None:
  *     for tx in T.thread_binding(0, 16, thread="threadIdx.x"):
  *         for i in T.serial(0, 16,
  *                           annotations={"software_pipeline_stage": [0, 1],
@@ -601,7 +673,7 @@ TVM_DLL Pass UnifiedStaticMemoryPlanner();
  *
  * \code{.py}
  * @T.prim_func
- * def after_transform(A: T.Buffer[(16, 16), "float32"], C: T.Buffer[(16, 16), "float32"]) -> None:
+ * def after_transform(A: T.Buffer((16, 16), "float32"), C: T.Buffer((16, 16), "float32")) -> None:
  *     for tx in T.thread_binding(0, 16, thread="threadIdx.x"):
  *         with T.block():
  *             T.reads([A[tx, 0:16]])
@@ -648,6 +720,12 @@ TVM_DLL Pass BindParams(const Array<runtime::NDArray>& constants);
 TVM_DLL Pass ExtractPrimFuncConstants();
 
 /*!
+ * \brief Automatically do memory optimizations for auto copy blocks
+ * \return The pass.
+ */
+TVM_DLL Pass LowerAutoCopy();
+
+/*!
  * \brief Renormalize the split pattern from floordiv(floormod()) to floormod(floordiv())
  * \return The pass.
  */
@@ -676,6 +754,12 @@ TVM_DLL Pass Filter(runtime::TypedPackedFunc<bool(PrimFunc)> fcond);
  * \return The pass.
  */
 TVM_DLL Pass InjectPTXAsyncCopy();
+
+/*!
+ * \brief Pass to rewrite global to local memory copy on CUDA with ldg32 instruction.
+ * \return The pass.
+ */
+TVM_DLL Pass InjectPTXLDG32(bool enable_ptx_ldg32 = true);
 
 /*!
  * \brief Remove the weight layout rewrite block

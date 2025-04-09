@@ -142,7 +142,7 @@ ExprPrecedence GetExprPrecedence(const ExprDoc& doc) {
 
 class PythonDocPrinter : public DocPrinter {
  public:
-  explicit PythonDocPrinter(const DocPrinterOptions& options) : DocPrinter(options) {}
+  explicit PythonDocPrinter(const PrinterConfig& options) : DocPrinter(options) {}
 
  protected:
   using DocPrinter::PrintDoc;
@@ -169,9 +169,16 @@ class PythonDocPrinter : public DocPrinter {
   void PrintTypedDoc(const ScopeDoc& doc) final;
   void PrintTypedDoc(const FunctionDoc& doc) final;
   void PrintTypedDoc(const ClassDoc& doc) final;
+  void PrintTypedDoc(const CommentDoc& doc) final;
+  void PrintTypedDoc(const DocStringDoc& doc) final;
 
  private:
-  void NewLineWithoutIndent() { output_ << "\n"; }
+  void NewLineWithoutIndent() {
+    size_t start_pos = output_.tellp();
+    output_ << "\n";
+    size_t end_pos = output_.tellp();
+    underlines_exempted_.push_back({start_pos, end_pos});
+  }
 
   template <typename DocType>
   void PrintJoinedDocs(const Array<DocType>& docs, const std::string& separator) {
@@ -249,23 +256,37 @@ class PythonDocPrinter : public DocPrinter {
       bool has_newline = std::find(comment.begin(), comment.end(), '\n') != comment.end();
       CHECK(!has_newline) << "ValueError: the comment string of " << stmt->GetTypeKey()
                           << " cannot have newline.";
+      size_t start_pos = output_.tellp();
       output_ << "  # " << comment;
+      size_t end_pos = output_.tellp();
+      underlines_exempted_.push_back({start_pos, end_pos});
     }
   }
 
-  void MaybePrintCommentWithNewLine(const StmtDoc& stmt) {
+  void MaybePrintCommenMultiLines(const StmtDoc& stmt, bool new_line = false) {
     if (stmt->comment.defined()) {
       std::vector<std::string> comment_lines = support::Split(stmt->comment.value(), '\n');
+      bool first_line = true;
+      size_t start_pos = output_.tellp();
       for (const std::string& line : comment_lines) {
-        output_ << "# " << line;
+        if (first_line) {
+          output_ << "# " << line;
+          first_line = false;
+        } else {
+          NewLine() << "# " << line;
+        }
+      }
+      size_t end_pos = output_.tellp();
+      underlines_exempted_.push_back({start_pos, end_pos});
+      if (new_line) {
         NewLine();
       }
     }
   }
 
-  void PrintBlockComment(const String& comment) {
-    IncreaseIndent();
-    NewLine() << "\"\"\"";
+  void PrintDocString(const String& comment) {
+    size_t start_pos = output_.tellp();
+    output_ << "\"\"\"";
 
     std::vector<std::string> comment_lines = support::Split(comment, '\n');
     for (const std::string& line : comment_lines) {
@@ -278,6 +299,14 @@ class PythonDocPrinter : public DocPrinter {
     }
 
     NewLine() << "\"\"\"";
+    size_t end_pos = output_.tellp();
+    underlines_exempted_.push_back({start_pos, end_pos});
+  }
+
+  void PrintBlockComment(const String& comment) {
+    IncreaseIndent();
+    NewLine();
+    PrintDocString(comment);
     DecreaseIndent();
   }
 };
@@ -500,7 +529,9 @@ void PythonDocPrinter::PrintTypedDoc(const SliceDoc& doc) {
 void PythonDocPrinter::PrintTypedDoc(const StmtBlockDoc& doc) {
   for (const StmtDoc& stmt : doc->stmts) {
     PrintDoc(stmt);
-    NewLine();
+    if (stmt != doc->stmts.back()) {
+      NewLine();
+    }
   }
 }
 
@@ -517,13 +548,17 @@ void PythonDocPrinter::PrintTypedDoc(const AssignDoc& doc) {
   }
   if (doc->rhs) {
     output_ << " = ";
-    PrintDoc(doc->rhs.value());
+    if (const auto* tuple_doc = doc->rhs.as<TupleDocNode>()) {
+      PrintJoinedDocs(tuple_doc->elements, ", ");
+    } else {
+      PrintDoc(doc->rhs.value());
+    }
   }
   MaybePrintCommentInline(doc);
 }
 
 void PythonDocPrinter::PrintTypedDoc(const IfDoc& doc) {
-  MaybePrintCommentWithNewLine(doc);
+  MaybePrintCommenMultiLines(doc, true);
   output_ << "if ";
   PrintDoc(doc->predicate);
   output_ << ":";
@@ -538,7 +573,7 @@ void PythonDocPrinter::PrintTypedDoc(const IfDoc& doc) {
 }
 
 void PythonDocPrinter::PrintTypedDoc(const WhileDoc& doc) {
-  MaybePrintCommentWithNewLine(doc);
+  MaybePrintCommenMultiLines(doc, true);
   output_ << "while ";
   PrintDoc(doc->predicate);
   output_ << ":";
@@ -547,9 +582,18 @@ void PythonDocPrinter::PrintTypedDoc(const WhileDoc& doc) {
 }
 
 void PythonDocPrinter::PrintTypedDoc(const ForDoc& doc) {
-  MaybePrintCommentWithNewLine(doc);
+  MaybePrintCommenMultiLines(doc, true);
   output_ << "for ";
-  PrintDoc(doc->lhs);
+  if (const auto* tuple = doc->lhs.as<TupleDocNode>()) {
+    if (tuple->elements.size() == 1) {
+      PrintDoc(tuple->elements[0]);
+      output_ << ",";
+    } else {
+      PrintJoinedDocs(tuple->elements, ", ");
+    }
+  } else {
+    PrintDoc(doc->lhs);
+  }
   output_ << " in ";
   PrintDoc(doc->rhs);
   output_ << ":";
@@ -558,7 +602,7 @@ void PythonDocPrinter::PrintTypedDoc(const ForDoc& doc) {
 }
 
 void PythonDocPrinter::PrintTypedDoc(const ScopeDoc& doc) {
-  MaybePrintCommentWithNewLine(doc);
+  MaybePrintCommenMultiLines(doc, true);
   output_ << "with ";
   PrintDoc(doc->rhs);
   if (doc->lhs != nullptr) {
@@ -630,21 +674,32 @@ void PythonDocPrinter::PrintTypedDoc(const ClassDoc& doc) {
     PrintBlockComment(doc->comment.value());
   }
   PrintIndentedBlock(doc->body);
-  NewLineWithoutIndent();
 }
 
-String DocToPythonScript(Doc doc, int indent_spaces, bool print_line_numbers, int num_context_lines,
-                         Optional<ObjectPath> path_to_underline) {
-  DocPrinterOptions options;
-  options.indent_spaces = indent_spaces;
-  options.print_line_numbers = print_line_numbers;
-  if (num_context_lines >= 0) {
-    options.num_context_lines = num_context_lines;
+void PythonDocPrinter::PrintTypedDoc(const CommentDoc& doc) {
+  if (doc->comment.defined()) {
+    MaybePrintCommenMultiLines(doc, false);
   }
+}
 
-  PythonDocPrinter printer(options);
-  printer.Append(doc, path_to_underline);
-  return printer.GetString();
+void PythonDocPrinter::PrintTypedDoc(const DocStringDoc& doc) {
+  if (doc->comment.defined() && !doc->comment.value().empty()) {
+    PrintDocString(doc->comment.value());
+  }
+}
+
+String DocToPythonScript(Doc doc, const PrinterConfig& cfg) {
+  if (cfg->num_context_lines < 0) {
+    cfg->num_context_lines = std::numeric_limits<int32_t>::max();
+  }
+  PythonDocPrinter printer(cfg);
+  printer.Append(doc, cfg);
+  std::string result = printer.GetString();
+  int last_space = result.size();
+  while (last_space > 0 && std::isspace(result[last_space - 1])) {
+    last_space--;
+  }
+  return result.substr(0, last_space);
 }
 
 TVM_REGISTER_GLOBAL("script.printer.DocToPythonScript").set_body_typed(DocToPythonScript);

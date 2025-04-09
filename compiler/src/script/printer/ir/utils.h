@@ -23,16 +23,16 @@
 #include <tvm/ir/function.h>
 #include <tvm/ir/op.h>
 #include <tvm/script/printer/ir_docsifier.h>
-#include <tvm/script/printer/printer.h>
 #include <tvm/support/with.h>
 
+#include <string>
 #include <utility>
+
+#include "../utils.h"
 
 namespace tvm {
 namespace script {
 namespace printer {
-
-inline ExprDoc IR(const IRDocsifier& d) { return IdDoc("tvm")->Attr("script"); }
 
 class IRFrameNode : public FrameNode {
  public:
@@ -53,6 +53,14 @@ class IRFrame : public Frame {
 
   TVM_DEFINE_MUTABLE_NOTNULLABLE_OBJECT_REF_METHODS(IRFrame, Frame, IRFrameNode);
 };
+
+/*! \brief Redirected method for the ReprPrinter */
+inline std::string ReprPrintIR(const ObjectRef& obj, const PrinterConfig& cfg) {
+  IRDocsifier d(cfg);
+  With<IRFrame> f(d);
+  (*f)->AddDispatchToken(d, "ir");
+  return Docsify(obj, d, *f, cfg);
+}
 
 }  // namespace printer
 }  // namespace script

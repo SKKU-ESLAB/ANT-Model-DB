@@ -116,7 +116,9 @@ def _enable_auto_inline(sch):
     return True
 
 
-def schedule_reduce_impl(outs, schedule_reduce_stage, schedule_injective_stage):
+def schedule_reduce_impl(
+    outs, schedule_reduce_stage, schedule_injective_stage, inline_postops=False
+):
     """Schedule for inject->reduce->bcast ops.
     Traverse over the stages in the schedule and schedule separate stages depending
     on the position of the stage. Injecteve post-ops of reduction will be scheduled using
@@ -153,14 +155,14 @@ def schedule_reduce_impl(outs, schedule_reduce_stage, schedule_injective_stage):
                 if tensor.op not in scheduled_ops:
                     traverse_before_reduce(tensor.op)
         else:
-            raise RuntimeError("Unsupported operator: %s" % operator.tag)
+            raise RuntimeError(f"Unsupported operator: {operator.tag}")
 
         scheduled_ops.append(operator)
 
     def traverse_after_reduce(operator):
         """Internal traverse function"""
         if tag.is_broadcast(operator.tag):
-            if operator not in scheduled_ops:
+            if operator not in scheduled_ops and not inline_postops:
                 schedule_injective_stage(sch, operator.output(0))
             for tensor in operator.input_tensors:
                 if tensor.op not in scheduled_ops:
@@ -184,7 +186,7 @@ def schedule_reduce_impl(outs, schedule_reduce_stage, schedule_injective_stage):
         elif isinstance(operator, tvm.te.PlaceholderOp):
             pass
         else:
-            raise RuntimeError("Unsupported operator: %s" % operator.tag)
+            raise RuntimeError(f"Unsupported operator: {operator.tag}")
 
         scheduled_ops.append(operator)
 

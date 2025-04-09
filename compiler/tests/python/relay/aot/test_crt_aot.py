@@ -16,35 +16,34 @@
 # under the License.
 """AOT with C Runtime Tests"""
 
-from collections import OrderedDict
-import re
 import os
-import tarfile
 import pathlib
+import re
+import tarfile
+from collections import OrderedDict
 
 import numpy as np
 import pytest
-
 import tvm
-from tvm import relay, TVMError
+from tvm import TVMError, relay
 from tvm.contrib import utils
-from tvm.ir.module import IRModule
-from tvm.relay import testing, transform
-from tvm.relay.testing import byoc
-from tvm.relay.op.annotation import compiler_begin, compiler_end
-from tvm.relay.backend import Executor, Runtime
-from tvm.micro import model_library_format as mlf
-from tvm.micro import export_model_library_format
 from tvm.ir.instrument import pass_instrument
+from tvm.ir.module import IRModule
+from tvm.micro import export_model_library_format
+from tvm.micro import model_library_format as mlf
+from tvm.micro.testing.aot_test_utils import AOT_DEFAULT_RUNNER, parametrize_aot_options
+from tvm.micro.testing.utils import get_conv2d_relay_module
+from tvm.relay import testing, transform
+from tvm.relay.backend import Executor, Runtime
+from tvm.relay.op.annotation import compiler_begin, compiler_end
+from tvm.relay.testing import byoc
 from tvm.testing.aot import (
     AOTTestModel,
-    generate_ref_data,
     compile_and_run,
     compile_models,
     create_relay_module_and_inputs_from_tflite_file,
+    generate_ref_data,
 )
-from tvm.micro.testing.aot_test_utils import AOT_DEFAULT_RUNNER, parametrize_aot_options
-from tvm.micro.testing.utils import get_conv2d_relay_module
 
 
 def test_error_c_interface_with_packed_api():
@@ -774,7 +773,7 @@ def test_aot_codegen_backend_alloc_workspace_calls():
     # small tensors that would get lowered to stack allocations in the CPU PrimFuncs.
     # However, the AoT executor codegen should retain them as TVMBAW calls
     # pylint: disable=line-too-long
-    relay_mod = tvm.parser.fromtext(
+    relay_mod = tvm.relay.fromtext(
         """
         #[version = "0.0.5"]
         def @main(%data: Tensor[(1, 4, 4, 4), float32], %weight: Tensor[(4, 4, 3, 3), float32], src_layout="OIHW", dst_layout="OIHW4i4o") -> Tensor[(1, 4, 4, 4), float32] {
@@ -803,6 +802,7 @@ def test_aot_codegen_backend_alloc_workspace_calls():
         models=AOTTestModel(module=relay_mod, inputs=None, outputs=None),
         interface_api="c",
         use_unpacked_api=True,
+        pass_config={"tir.usmp.enable": False},
     )
     source = compiled_test_mods[0].executor_factory.lib.imported_modules[0].get_source()
     # There should be three allocates created for three primitive relay function
@@ -828,6 +828,7 @@ def test_constants_alignment(constants_byte_alignment):
         interface_api,
         use_unpacked_api,
         target=tvm.target.Target(target, host=target),
+        pass_config={"tir.usmp.enable": False},
     )
     source = compiled_test_mods[0].executor_factory.lib.imported_modules[0].get_source()
     assert f'__attribute__((section(".rodata.tvm"), aligned({constants_byte_alignment})))' in source
@@ -967,6 +968,7 @@ def test_workspace_calculation(workspace_byte_alignment, main_workspace_size):
         opt_level=3,
         config={
             "tir.disable_vectorize": True,
+            "tir.usmp.enable": False,
         },
     ):
         lib = tvm.relay.build(mod, target, executor=executor, runtime=runtime, params=params)
@@ -985,8 +987,8 @@ def test_workspace_calculation_cmsis_nn():
     pytest.importorskip("tflite")
 
     # pylint: disable=import-outside-toplevel
-    from tvm.relay.op.contrib import cmsisnn
     from tvm.contrib.download import download_testdata
+    from tvm.relay.op.contrib import cmsisnn
 
     # pylint: enable=import-outside-toplevel
 
@@ -1040,11 +1042,11 @@ def test_aot_codegen_checks_returns():
     main_func = main_ir_module["__tvm_main__"]
 
     # Check operator call is wrapped properly
+    body = main_func.body.value
     assert (
-        str(main_func.body[1])
-        == "tir.tvm_check_return(0, -1, tir.call_extern("
-        + '"tvmgen_default_fused_add",'
-        + " x_buffer_var, y_buffer_var, output_buffer_var))\n"
+        repr(body)
+        == 'T.tvm_check_return(0, -1, T.call_extern("int32", "tvmgen_default_fused_add",'
+        + " x_buffer_var, y_buffer_var, output_buffer_var))"
     )
     # TODO(Mousius) - Create a better place for C codegen tests
     assert (

@@ -23,6 +23,7 @@
   condition='!skip_ci && is_docs_only_build != 1',
   ws='tvm/build-cpu-minimal',
   docker_image='ci_minimal',
+  platform="minimal",
 ) %}
   sh (
     script: "${docker_run} ${ci_minimal} ./tests/scripts/task_config_build_minimal.sh build",
@@ -31,7 +32,7 @@
   cmake_build(ci_minimal, 'build', '-j2')
   make_standalone_crt(ci_minimal, 'build')
   make_cpp_tests(ci_minimal, 'build')
-  {{ m.upload_artifacts(tag='cpu-minimal', filenames=tvm_lib + tvm_allvisible + crttest + cpptest + standalone_crt) }}
+  {{ m.upload_artifacts(tag='cpu-minimal', filenames=tvm_lib + tvm_allvisible + crttest + cpptest + standalone_crt + microtvm_template_projects) }}
 {% endcall %}
 
 

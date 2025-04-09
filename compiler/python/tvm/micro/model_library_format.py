@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# pylint: disable=cell-var-from-loop, use-list-literal
 
 """Defines functions for exporting to Model Library Format."""
 
@@ -26,18 +27,20 @@ import tarfile
 import typing
 
 import tvm
-from tvm.micro import get_standalone_crt_dir
+from tvm.micro import get_standalone_crt_dir, get_microtvm_template_projects
+
 from .._ffi import get_global_func
 from ..contrib import utils
 from ..driver import build_module
-from ..relay.backend import executor_factory
-from ..relay.backend.name_transforms import to_c_variable_style, prefix_generated_name
 from ..relay import param_dict
+from ..relay.backend import executor_factory
+from ..relay.backend.name_transforms import prefix_generated_name, to_c_variable_style
 from ..tir import expr
 
 # This should be kept identical to runtime::symbol::tvm_module_main
 MAIN_FUNC_NAME_STR = "__tvm_main__"
 STANDALONE_CRT_URL = "./runtime"
+CRT_TEMPLATE_FILES_URL = "./templates"
 METADATA_FILE = "metadata.json"
 
 
@@ -372,7 +375,18 @@ def _make_tar(source_dir, tar_file_path, modules):
         for mod in modules:
             is_aot = isinstance(mod, executor_factory.AOTExecutorFactoryModule)
             if is_aot and str(mod.runtime) == "crt":
+                crt_template_path = pathlib.Path(get_microtvm_template_projects("crt"))
                 tar_f.add(get_standalone_crt_dir(), arcname=STANDALONE_CRT_URL)
+
+                # Add template files from CRT template project
+                for file in [
+                    "templates/crt_config.h.template",
+                    "templates/platform.c.template",
+                ]:
+                    tar_f.add(
+                        crt_template_path / pathlib.Path(file),
+                        arcname=f"{CRT_TEMPLATE_FILES_URL}/{pathlib.Path(file).name}",
+                    )
                 break
 
 
@@ -528,7 +542,7 @@ def _write_tir_and_build_operator_memory_map(src_dir, targets, ir_module_by_targ
         # TODO(mbs): The device type is not unique, better would be to use target.kind.name
         target_device_type = target.get_target_device_type()
         ir_mod = ir_module_by_target[target]
-        printer = get_global_func("tir.ModelLibraryFormatPrinter")(False, None, False)
+        printer = get_global_func("relay.ir.ModelLibraryFormatPrinter")(False, None, False)
         with open(src_dir / f"tir-{target_device_type}.txt", "w") as f:
             f.write(printer["print"](ir_mod))
 
@@ -562,7 +576,7 @@ def _export_operator_model_library_format(mod: build_module.OperatorModule, temp
     """
     targets = []
     for target in mod.ir_module_by_target.keys():
-        if str(target.kind) not in ("llvm", "c"):
+        if str(target.kind) not in ("llvm", "c", "gemmini"):
             raise UnsupportedInModelLibraryFormatError(
                 f"Operator has non-DSO-exportable target {target!s}, which is not yet supported in "
                 "Model Library Format"

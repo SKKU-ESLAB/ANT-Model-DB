@@ -12,11 +12,11 @@ include(cmake/utils/FindLLVM.cmake)
 include(cmake/utils/FindROCM.cmake)
 include(cmake/utils/FindEthosN.cmake)
 
-if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/config.cmake)
-  include(${CMAKE_CURRENT_BINARY_DIR}/config.cmake)
+if(EXISTS ${CMAKE_BINARY_DIR}/config.cmake)
+  include(${CMAKE_BINARY_DIR}/config.cmake)
 else()
-  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/config.cmake)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/config.cmake)
+  if(EXISTS ${CMAKE_SOURCE_DIR}/config.cmake)
+    include(${CMAKE_SOURCE_DIR}/config.cmake)
   endif()
 endif()
 
@@ -68,9 +68,10 @@ tvm_option(USE_FALLBACK_STL_MAP "Use TVM's POD compatible Map" OFF)
 tvm_option(USE_ETHOSN "Build with Arm(R) Ethos(TM)-N" OFF)
 tvm_option(USE_CMSISNN "Build with Arm CMSIS-NN" OFF)
 tvm_option(INDEX_DEFAULT_I64 "Defaults the index datatype to int64" ON)
-tvm_option(USE_LIBBACKTRACE "Build libbacktrace to supply linenumbers on stack traces" AUTO)
+tvm_option(USE_LIBBACKTRACE "Use libbacktrace to supply linenumbers on stack traces" AUTO)
 tvm_option(BACKTRACE_ON_SEGFAULT "Install a signal handler to print a backtrace on segfault" OFF)
 tvm_option(BUILD_STATIC_RUNTIME "Build static version of libtvm_runtime" OFF)
+tvm_option(BUILD_DUMMY_LIBTVM "Build a dummy version of libtvm" OFF)
 tvm_option(USE_PAPI "Use Performance Application Programming Interface (PAPI) to read performance counters" OFF)
 tvm_option(USE_GTEST "Use GoogleTest for C++ sanity tests" AUTO)
 tvm_option(USE_CUSTOM_LOGGING "Use user-defined custom logging, tvm::runtime::detail::LogFatalImpl and tvm::runtime::detail::LogMessageImpl must be implemented" OFF)
@@ -151,6 +152,9 @@ if(MSVC)
   add_definitions(-D_SCL_SECURE_NO_WARNINGS)
   add_definitions(-D_ENABLE_EXTENDED_ALIGNED_STORAGE)
   add_definitions(-DNOMINMAX)
+  # log error before throw as usually windows
+  # may have issues with stack trace
+  add_definitions(-DDMLC_LOG_BEFORE_THROW=1)
   # regeneration does not work well with msbuild custom rules.
   set(CMAKE_SUPPRESS_REGENERATION ON)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
@@ -287,8 +291,6 @@ tvm_file_glob(GLOB_RECURSE COMPILER_SRCS
     src/tir/*.cc
     src/topi/*.cc
     src/driver/*.cc
-    src/parser/*.cc
-    src/printer/*.cc
     src/support/*.cc
     src/script/*.cc
     )
@@ -317,6 +319,8 @@ tvm_file_glob(GLOB RELAY_BACKEND_SRCS
     )
 tvm_file_glob(GLOB_RECURSE RELAY_IR_SRCS
     src/relay/ir/*.cc
+    src/relay/printer/*.cc
+    src/relay/parser/*.cc
     )
 tvm_file_glob(GLOB_RECURSE RELAY_QNN_SRCS
     src/relay/qnn/*.cc
@@ -478,13 +482,23 @@ endif(USE_KALLOC_ALIGNMENT)
 # need to be re-compiled every time. Using ccache 4.0+ can resolve this issue.
 include(cmake/utils/CCache.cmake)
 
+include(CheckCXXCompilerFlag)
+if(NOT MSVC)
+  check_cxx_compiler_flag("-std=c++17" SUPPORT_CXX17)
+  set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CUDA_STANDARD 17)
+else()
+  check_cxx_compiler_flag("/std:c++17" SUPPORT_CXX17)
+  set(CMAKE_CXX_FLAGS "/std:c++17 ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CUDA_STANDARD 17)
+endif()
+
 # Module rules
 include(cmake/modules/VTA.cmake)
 include(cmake/modules/StandaloneCrt.cmake)
-include(cmake/modules/Zephyr.cmake)
-include(cmake/modules/Arduino.cmake)
 include(cmake/modules/CUDA.cmake)
 include(cmake/modules/Hexagon.cmake) # This must come before logging.cmake
+include(cmake/modules/contrib/CLML.cmake) # Must be before OpenCL.cmake
 include(cmake/modules/OpenCL.cmake)
 include(cmake/modules/OpenMP.cmake)
 include(cmake/modules/Vulkan.cmake)
@@ -495,6 +509,7 @@ include(cmake/modules/Micro.cmake)
 include(cmake/modules/contrib/EthosN.cmake)
 include(cmake/modules/contrib/CMSISNN.cmake)
 include(cmake/modules/contrib/EthosU.cmake)
+include(cmake/modules/contrib/Gemmini.cmake)
 include(cmake/modules/contrib/BLAS.cmake)
 include(cmake/modules/contrib/CODEGENC.cmake)
 include(cmake/modules/contrib/DNNL.cmake)
@@ -518,22 +533,10 @@ include(cmake/modules/contrib/ArmComputeLib.cmake)
 include(cmake/modules/contrib/TensorRT.cmake)
 include(cmake/modules/contrib/VitisAI.cmake)
 include(cmake/modules/contrib/Verilator.cmake)
-include(cmake/modules/contrib/CLML.cmake)
 include(cmake/modules/contrib/UMA.cmake)
 include(cmake/modules/Git.cmake)
 include(cmake/modules/LibInfo.cmake)
 include(cmake/modules/RustExt.cmake)
-
-include(CheckCXXCompilerFlag)
-if(NOT MSVC)
-  check_cxx_compiler_flag("-std=c++17" SUPPORT_CXX17)
-  set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
-  set(CMAKE_CUDA_STANDARD 17)
-else()
-  check_cxx_compiler_flag("/std:c++17" SUPPORT_CXX17)
-  set(CMAKE_CXX_FLAGS "/std:c++17 ${CMAKE_CXX_FLAGS}")
-  set(CMAKE_CUDA_STANDARD 17)
-endif()
 
 set(LIBINFO_FILE ${CMAKE_CURRENT_LIST_DIR}/src/support/libinfo.cc)
 add_lib_info(${LIBINFO_FILE})
@@ -543,7 +546,14 @@ add_library(tvm_objs OBJECT ${COMPILER_SRCS})
 add_library(tvm_runtime_objs OBJECT ${RUNTIME_SRCS})
 add_library(tvm_libinfo_objs OBJECT ${LIBINFO_FILE})
 
-add_library(tvm SHARED $<TARGET_OBJECTS:tvm_objs> $<TARGET_OBJECTS:tvm_runtime_objs> $<TARGET_OBJECTS:tvm_libinfo_objs>)
+if(NOT BUILD_DUMMY_LIBTVM)
+  add_library(tvm SHARED $<TARGET_OBJECTS:tvm_objs> $<TARGET_OBJECTS:tvm_runtime_objs> $<TARGET_OBJECTS:tvm_libinfo_objs>)
+else()
+  # dummy version of libtvm that can be used by downstream to specify dependencies
+  # the real runner still need a full version of libtvm
+  add_library(tvm SHARED $<TARGET_OBJECTS:tvm_runtime_objs> $<TARGET_OBJECTS:tvm_libinfo_objs>)
+endif()
+
 target_include_directories(tvm PUBLIC "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 set_property(TARGET tvm APPEND PROPERTY LINK_OPTIONS "${TVM_NO_UNDEFINED_SYMBOLS}")
 set_property(TARGET tvm APPEND PROPERTY LINK_OPTIONS "${TVM_VISIBILITY_FLAG}")
@@ -559,6 +569,8 @@ else()
   add_library(tvm_runtime SHARED $<TARGET_OBJECTS:tvm_runtime_objs> $<TARGET_OBJECTS:tvm_libinfo_objs>)
   set_property(TARGET tvm_runtime APPEND PROPERTY LINK_OPTIONS "${TVM_NO_UNDEFINED_SYMBOLS}")
 endif()
+
+
 target_include_directories(tvm_runtime PUBLIC "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 set_property(TARGET tvm_runtime APPEND PROPERTY LINK_OPTIONS "${TVM_VISIBILITY_FLAG}")
 
@@ -576,19 +588,21 @@ include(cmake/modules/contrib/PAPI.cmake)
 if(USE_MICRO)
   # NOTE: cmake doesn't track dependencies at the file level across subdirectories. For the
   # Unix Makefiles generator, need to add these explicit target-level dependency)
-  add_dependencies(tvm_runtime zephyr)
   add_dependencies(tvm_runtime arduino)
-  if(MSVC)
-    target_link_libraries(tvm PRIVATE host_standalone_crt )
-    target_link_libraries(tvm_runtime PRIVATE host_standalone_crt)
-  else()
-    add_dependencies(tvm host_standalone_crt)
-    add_dependencies(tvm_runtime host_standalone_crt)
+  add_dependencies(tvm_runtime crt)
+  add_dependencies(tvm_runtime host_standalone_crt)
+  add_dependencies(tvm_runtime zephyr)
+  if(USE_GEMMINI)
+    add_dependencies(tvm_runtime gemmini)
   endif()
 endif()
 
 if(USE_CPP_RPC)
   add_subdirectory("apps/cpp_rpc")
+endif()
+
+if(USE_CPP_RTVM)
+  add_subdirectory("apps/cpp_rtvm")
 endif()
 
 if(USE_IOS_RPC)
@@ -630,7 +644,11 @@ if(USE_THREADS AND NOT BUILD_FOR_HEXAGON)
   target_link_libraries(tvm_runtime PUBLIC Threads::Threads)
 endif()
 
-target_link_libraries(tvm PRIVATE ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
+if(NOT BUILD_DUMMY_LIBTVM)
+  target_link_libraries(tvm PRIVATE ${TVM_LINKER_LIBS})
+endif()
+
+target_link_libraries(tvm PRIVATE ${TVM_RUNTIME_LINKER_LIBS})
 target_link_libraries(tvm_runtime PRIVATE ${TVM_RUNTIME_LINKER_LIBS})
 
 if(BUILD_FOR_HEXAGON AND DEFINED USE_HEXAGON_GTEST AND EXISTS ${USE_HEXAGON_GTEST})
@@ -812,3 +830,9 @@ if(${SUMMARIZE})
 endif()
 
 dump_options_to_file("${TVM_ALL_OPTIONS}")
+
+if(USE_CUDA AND USE_CUTLASS)
+  install(TARGETS fpA_intB_gemm EXPORT ${PROJECT_NAME}Targets DESTINATION lib${LIB_SUFFIX})
+  target_link_libraries(tvm PRIVATE fpA_intB_gemm)
+  target_link_libraries(tvm_runtime PRIVATE fpA_intB_gemm)
+endif()

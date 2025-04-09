@@ -88,13 +88,16 @@ class MetadataModuleNode : public ::tvm::runtime::ModuleNode {
 
   const char* type_key() const final { return "metadata_module"; }
 
+  /*! \brief Get the property of the runtime module .*/
+  int GetPropertyMask() const final { return ModulePropertyMask::kBinarySerializable; }
+
   static Module LoadFromBinary() {
     return Module(make_object<MetadataModuleNode>(runtime::metadata::Metadata()));
   }
 
   void SaveToBinary(dmlc::Stream* stream) final {}
 
-  PackedFunc GetFunction(const std::string& name, const ObjectPtr<Object>& sptr_to_self) {
+  PackedFunc GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self) {
     if (name == "get_metadata") {
       return PackedFunc([this, sptr_to_self](TVMArgs args, TVMRetValue* rv) {
         if (!metadata_.defined()) {

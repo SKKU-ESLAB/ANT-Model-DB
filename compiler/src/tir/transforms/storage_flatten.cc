@@ -846,14 +846,6 @@ class BufferBindUnwrapper : public StmtExprMutator {
     return output;
   }
 
-  Stmt VisitStmt_(const StoreNode* op) final {
-    LOG(FATAL) << "Unexpected use of deprecated StoreNode.  Please use BufferStoreNode instead.";
-  }
-
-  PrimExpr VisitExpr_(const LoadNode* op) final {
-    LOG(FATAL) << "Unexpected use of deprecated LoadNode.  Please use BufferLoadNode instead.";
-  }
-
   Stmt VisitStmt_(const AttrStmtNode* op) final {
     ICHECK_NE(op->attr_key, attr::buffer_dim_align)
         << "BufferBindUnwrapper assumes that all buffers have accurate strides, "
@@ -1386,14 +1378,6 @@ class StorageFlattener : public StmtExprMutator {
     cache_line_size_ = cache_line_size;
   }
 
-  Stmt VisitStmt_(const StoreNode* op) final {
-    LOG(FATAL) << "Unexpected use of deprecated StoreNode.  Please use BufferStoreNode instead.";
-  }
-
-  PrimExpr VisitExpr_(const LoadNode* op) final {
-    LOG(FATAL) << "Unexpected use of deprecated LoadNode.  Please use BufferLoadNode instead.";
-  }
-
   Stmt VisitStmt_(const AttrStmtNode* op) final {
     ICHECK_NE(op->attr_key, attr::buffer_dim_align)
         << "StorageFlattener assumes that all buffers have accurate strides, "
@@ -1445,6 +1429,15 @@ class StorageFlattener : public StmtExprMutator {
       }
     }
     return body;
+  }
+
+  Stmt VisitStmt_(const DeclBufferNode* op) final {
+    auto node = Downcast<DeclBuffer>(StmtExprMutator::VisitStmt_(op));
+    const BufferEntry& entry = GetBufferEntry(node->buffer);
+    if (!entry.flattened_buffer.same_as(node->buffer)) {
+      node.CopyOnWrite()->buffer = entry.flattened_buffer;
+    }
+    return std::move(node);
   }
 
   // AllocateNodes may be present from tvm.tir.ir_builder.  This can

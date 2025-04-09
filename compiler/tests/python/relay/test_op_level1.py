@@ -760,9 +760,7 @@ def test_bitserial_dense():
     assert yy.checked_type == relay.TensorType((m, 32), "int16")
 
 
-@tvm.testing.requires_cascadelake
-@pytest.mark.parametrize("m,n,k", [(32, 128, 96), (32, 128, 97)])
-def test_dense_vnni(m, n, k):
+def dense_x86_test(m, n, k, target="llvm -mcpu=cascadelake", intrins=["vpdpbusd"]):
     data_shape = (m, k)
     weight_shape = (n, k)
 
@@ -774,12 +772,14 @@ def test_dense_vnni(m, n, k):
         out = relay.nn.bias_add(dense, bias)
         mod = tvm.IRModule.from_expr(out)
 
-        target = "llvm -mcpu=cascadelake"
         with tvm.transform.PassContext(opt_level=3):
             lib = relay.build(mod, target=target)
 
-        asm = lib.lib.get_source("asm")
-        assert "vpdpbusd" in asm
+        # TODO(vvchernov): needs for avx512 arch, can be extended
+        if n % 16 == 0 and k % 4 == 0:
+            asm = lib.lib.get_source("asm")
+            for intrin in intrins:
+                assert intrin in asm
 
         dev = tvm.device(target, 0)
         runtime = tvm.contrib.graph_executor.GraphModule(lib["default"](dev))
@@ -846,6 +846,18 @@ def test_dense_amx_int8():
         np.testing.assert_equal(out, ref)
 
 
+@tvm.testing.requires_cascadelake
+@pytest.mark.parametrize("m,n,k", [(32, 128, 96), (32, 128, 97)])
+def test_dense_vnni(m, n, k):
+    dense_x86_test(m, n, k)
+
+
+@tvm.testing.requires_skylake_avx512
+@pytest.mark.parametrize("m,n,k", [(32, 128, 96), (32, 128, 97)])
+def test_dense_skylake_avx512(m, n, k):
+    dense_x86_test(m, n, k, "llvm -mcpu=skylake-avx512", ["pmaddubs", "pmaddw", "vpaddd"])
+
+
 @pytest.mark.skip("Requires GFX10 AMDGPU")
 def test_dense_rocm_sdot4():
     data_shape = (32, 96)
@@ -889,7 +901,7 @@ def test_extern_concat_injective_fuse():
     # do not have their elem_offset explicitly set as a variable.
 
     # fmt: off
-    mod = tvm.parser.fromtext(
+    mod = tvm.relay.fromtext(
         """
        #[version = "0.0.5"]
        def @main(%p0844: Tensor[(1, 384), int64], %p1652: Tensor[(2016, 128), float16]) {

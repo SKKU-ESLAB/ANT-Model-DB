@@ -48,8 +48,9 @@ static TargetFeatures ParseTargetWithAttrs(String mcpu, String mtriple, Array<St
 TEST(AProfileParser, ParseTargetKeys) {
   TargetJSON target = ParseTarget({});
   Array<String> keys = Downcast<Array<String>>(target.at("keys"));
-  ASSERT_EQ(keys.size(), 1);
+  ASSERT_EQ(keys.size(), 2);
   ASSERT_EQ(keys[0], "arm_cpu");
+  ASSERT_EQ(keys[1], "cpu");
 }
 
 TEST(AProfileParser, ParseTargetWithExistingKeys) {
@@ -289,9 +290,28 @@ TEST(AProfileParser, ArchVersionInvalidLetter) {
   ASSERT_EQ(Downcast<Bool>(features.at("has_dotprod")), false);
 }
 
+using AProfileOptionalSVE = testing::TestWithParam<float>;
+TEST_P(AProfileOptionalSVE, OptionalSVESupport) {
+  const std::string arch_attr = "+v" + std::to_string(GetParam()) + "a";
+
+  // Check that the "has_sve" feature is not set by default when "+sve" isn't set as an attribute.
+  TargetJSON target = ParseTargetWithAttrs("", "aarch64-arm-none-eabi", {arch_attr});
+  TargetFeatures features = Downcast<TargetFeatures>(target.at("features"));
+  EXPECT_TRUE(IsArch(target));
+  EXPECT_FALSE(Downcast<Bool>(features.at("has_sve")));
+
+  // Check that the "has_sve" feature is set when "+sve" is explicitly set as an attribute.
+  target = ParseTargetWithAttrs("", "aarch64-arm-none-eabi", {arch_attr, "+sve"});
+  features = Downcast<TargetFeatures>(target.at("features"));
+  EXPECT_TRUE(IsArch(target));
+  EXPECT_TRUE(Downcast<Bool>(features.at("has_sve")));
+}
+
 INSTANTIATE_TEST_CASE_P(AProfileParser, AProfileOptionalI8MM, ::testing::ValuesIn(optionalI8MM));
 INSTANTIATE_TEST_CASE_P(AProfileParser, AProfileOptionalDotProd,
                         ::testing::ValuesIn(optionalDotProd));
+INSTANTIATE_TEST_CASE_P(AProfileParser, AProfileOptionalSVE,
+                        ::testing::Values(8.0, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 9.0));
 
 }  // namespace aprofile
 }  // namespace parsers

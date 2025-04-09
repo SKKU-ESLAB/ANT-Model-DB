@@ -143,6 +143,12 @@ void BinaryOpMatchTypes(PrimExpr& lhs, PrimExpr& rhs, Span span) {  // NOLINT(*)
              !rtype.is_bfloat16()) {
     // Cast int->bfloat16 when the other operand is a bfloat16
     rhs = cast(ltype, rhs);
+  } else if (!ltype.is_float8() && rtype.is_float8()) {
+    // Cast int->float8 for lhs when rhs is a float8
+    lhs = cast(rtype, lhs);
+  } else if (ltype.is_float8() && !rtype.is_float8()) {
+    // Cast int->float8 for rhs when lhs is a float8
+    rhs = cast(ltype, rhs);
   } else if ((ltype.is_int() && rtype.is_int()) || (ltype.is_uint() && rtype.is_uint())) {
     // Promote int to higher bits e.g. int8 + int16 --> int16 + int16
     if (ltype.bits() < rtype.bits()) {
@@ -165,6 +171,7 @@ void BinaryOpMatchTypes(PrimExpr& lhs, PrimExpr& rhs, Span span) {  // NOLINT(*)
       }
     }
   } else {
+    LOG(INFO) << lhs << " " << rhs;
     LOG(FATAL) << "Cannot match type " << ltype << " vs " << rtype;
   }
 }
@@ -324,6 +331,8 @@ PrimExpr cast(const DataType& t, PrimExpr value, Span span) {
 // reinterpret
 PrimExpr reinterpret(const DataType& t, PrimExpr value, Span span) {
   if (value.dtype() == t) return value;
+  ICHECK(value.dtype().bits() * value.dtype().lanes() == t.bits() * t.lanes())
+      << "Bitcast requires size match " << t << " vs " << value.dtype();
   return tir::Call(t, tir::builtin::reinterpret(), {value}, span);
 }
 
@@ -1025,5 +1034,47 @@ TVM_REGISTER_GLOBAL("tir._OpIfThenElse")
 TVM_REGISTER_GLOBAL("tir.const_true").set_body_typed([](DataType t, Span span) {
   return const_true(t.lanes(), span);
 });
+
+PrimExpr fast_erf_float_expr(PrimExpr arg, int bits) {
+  auto plus_4 = make_const(DataType::Float(bits), 4.f);
+  auto minus_4 = make_const(DataType::Float(bits), -4.f);
+
+  // The monomial coefficients of the numerator polynomial (odd).
+  auto alpha_1 = make_const(DataType::Float(bits), -1.60960333262415e-02f);
+  auto alpha_3 = make_const(DataType::Float(bits), -2.95459980854025e-03f);
+  auto alpha_5 = make_const(DataType::Float(bits), -7.34990630326855e-04f);
+  auto alpha_7 = make_const(DataType::Float(bits), -5.69250639462346e-05f);
+  auto alpha_9 = make_const(DataType::Float(bits), -2.10102402082508e-06f);
+  auto alpha_11 = make_const(DataType::Float(bits), 2.77068142495902e-08f);
+  auto alpha_13 = make_const(DataType::Float(bits), -2.72614225801306e-10f);
+
+  // The monomial coefficients of the denominator polynomial (even).
+  auto beta_0 = make_const(DataType::Float(bits), -1.42647390514189e-02f);
+  auto beta_2 = make_const(DataType::Float(bits), -7.37332916720468e-03f);
+  auto beta_4 = make_const(DataType::Float(bits), -1.68282697438203e-03f);
+  auto beta_6 = make_const(DataType::Float(bits), -2.13374055278905e-04f);
+  auto beta_8 = make_const(DataType::Float(bits), -1.45660718464996e-05f);
+
+  // clamp x
+  auto x = tvm::max(tvm::min(arg, plus_4), minus_4);
+  auto x2 = x * x;
+
+  // Evaluate the numerator polynomial p.
+  auto p = x2 * alpha_13 + alpha_11;
+  p = x2 * p + alpha_9;
+  p = x2 * p + alpha_7;
+  p = x2 * p + alpha_5;
+  p = x2 * p + alpha_3;
+  p = x2 * p + alpha_1;
+  p = x * p;
+
+  // Evaluate the denominator polynomial p.
+  auto q = x2 * beta_8 + beta_6;
+  q = x2 * q + beta_4;
+  q = x2 * q + beta_2;
+  q = x2 * q + beta_0;
+
+  return p / q;
+}
 
 }  // namespace tvm

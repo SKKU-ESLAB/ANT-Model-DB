@@ -410,7 +410,7 @@ def test_packed_8x8x32_resnet50(hexagon_launcher):
 
     if do_tune:
         hexagon_lowered = tune_conv2d_template(
-            mod, _schedule_packed_8x8x32_conv2d, "packed_8x8x32", params, hexagon_launcher
+            mod, _schedule_packed_8x8x32_conv2d, "packed_8x8x32", params, hexagon_launcher, {}
         )
     else:
         with tvm.transform.PassContext(opt_level=3):
@@ -493,7 +493,7 @@ def _schedule_async_dma_conv2d():
         sch.parallel(new_loops[4])
         sch.unroll(new_loops[5])
         # TODO(nverke): Add compute optimizations here.
-        sch.blockize(loop=oc_i)
+        sch.blockize(target=oc_i)
 
         sch.tensorize(oc_i, VRMPY_u8i8i32_VTCM_INTRIN)
 
@@ -521,7 +521,6 @@ def test_async_dma_resnet50(hexagon_launcher):
 
     pass_config = {
         "tir.use_async_copy": 1,
-        "tir.merge_async_commit_queue_scope": False,
         "relay.backend.use_meta_schedule": True,
         "relay.backend.tir_converter": "default",
     }

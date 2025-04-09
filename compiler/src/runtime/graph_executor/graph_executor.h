@@ -81,13 +81,16 @@ class TVM_DLL GraphExecutor : public ModuleNode {
    * \param sptr_to_self The pointer to the module node.
    * \return The corresponding member function.
    */
-  virtual PackedFunc GetFunction(const std::string& name, const ObjectPtr<Object>& sptr_to_self);
+  virtual PackedFunc GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self);
 
   /*!
    * \return The type key of the executor.
    */
   const char* type_key() const final { return "GraphExecutor"; }
   void Run();
+
+  /*! \brief Get the property of the runtime module .*/
+  int GetPropertyMask() const final { return ModulePropertyMask::kRunnable; }
 
   /*!
    * \brief Initialize the graph executor with graph and device.
@@ -116,6 +119,12 @@ class TVM_DLL GraphExecutor : public ModuleNode {
    * \return The shape and dtype tuple.
    */
   std::tuple<ShapeInfo, DtypeInfo> GetInputInfo() const;
+
+  /*!
+   * \brief Get the output info of Graph by parsing the output nodes.
+   * \return The shape and dtype tuple.
+   */
+  std::tuple<ShapeInfo, DtypeInfo> GetOutputInfo() const;
 
   /*!
    * \brief Get the output index given the name of output.

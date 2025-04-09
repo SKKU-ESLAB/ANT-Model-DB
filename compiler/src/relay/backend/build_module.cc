@@ -172,7 +172,7 @@ class RelayBuildModule : public runtime::ModuleNode {
    * \param sptr_to_self The pointer to the module node.
    * \return The corresponding member function.
    */
-  PackedFunc GetFunction(const std::string& name, const ObjectPtr<Object>& sptr_to_self) final {
+  PackedFunc GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self) final {
     if (name == "get_graph_json") {
       return PackedFunc(
           [sptr_to_self, this](TVMArgs args, TVMRetValue* rv) { *rv = this->GetGraphJSON(); });
@@ -282,6 +282,9 @@ class RelayBuildModule : public runtime::ModuleNode {
    * \return const char*
    */
   const char* type_key() const final { return "RelayBuildModule"; }
+
+  /*! \brief Get the property of the runtime module .*/
+  int GetPropertyMask() const final { return runtime::ModulePropertyMask::kRunnable; }
 
   /*!
    * \brief Build relay IRModule for graph executor
@@ -396,7 +399,7 @@ class RelayBuildModule : public runtime::ModuleNode {
     relay_module = transform::Inline()(relay_module);
     relay_module = transform::InferType()(relay_module);
     relay_module = transform::LabelOps()(relay_module);
-    relay_module = transform::AnnotateMemoryScope(config_)(relay_module);
+    relay_module = transform::AnnotateMemoryScope()(relay_module);
 
     ICHECK(relay_module.defined());
 

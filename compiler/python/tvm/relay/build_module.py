@@ -575,7 +575,7 @@ class AotExecutor(_interpreter.Executor):
         ret_type = self.mod["main"].checked_type.ret_type
         if _ty.is_dynamic(ret_type):
             raise ValueError("AOT Executor only supports static graphs, got output type", ret_type)
-        mod = build(self.mod, target=self.target)
+        mod = build(self.mod, target=self.target, executor=Executor("aot"))
 
         # NOTE: Given AOT requires use of the "c" backend, must export/import to compile the
         # generated code.
@@ -683,4 +683,4 @@ def create_executor(kind="debug", mod=None, device=None, target="llvm", params=N
         return VMExecutor(mod, device, raw_targets)
     if kind == "aot":
         return AotExecutor(mod, device, raw_targets)
-    raise RuntimeError("unknown execution strategy: {0}".format(kind))
+    raise RuntimeError(f"unknown execution strategy: {kind}")

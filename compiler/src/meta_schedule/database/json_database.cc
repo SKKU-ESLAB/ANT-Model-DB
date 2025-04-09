@@ -127,7 +127,8 @@ class JSONDatabaseNode : public DatabaseNode {
     Array<TuningRecord> results;
     results.reserve(top_k);
     for (const TuningRecord& record : this->tuning_records_) {
-      if (!record->run_secs.defined() || record->run_secs.value().empty()) {
+      auto run_secs = record->run_secs;
+      if (!record->IsValid()) {
         continue;
       }
       if (record->workload.same_as(workload) ||
@@ -137,10 +138,6 @@ class JSONDatabaseNode : public DatabaseNode {
           break;
         }
       }
-    }
-    if (results.size() < static_cast<size_t>(top_k)) {
-      LOG(WARNING) << "The size of the GetTopK result is smaller than requested. There are not "
-                      "enough valid records in the database for this workload.";
     }
     return results;
   }
@@ -171,9 +168,13 @@ Database Database::JSONDatabase(String path_workload, String path_tuning_record,
     for (int i = 0; i < n_objs; ++i) {
       Workload workload = Workload::FromJSON(json_objs[i]);
       auto recalc_hash = n->GetModuleEquality().Hash(workload->mod);
-      CHECK_EQ(recalc_hash, workload->shash)
-          << "ValueError: Module hash changed. Given: " << workload->shash
-          << "; Recalculated: " << recalc_hash;
+      // Todo(tvm-team): re-enable the shash check when we get environment
+      // independent structural hash values.
+      if (recalc_hash != workload->shash) {
+        ObjectPtr<WorkloadNode> wkl = make_object<WorkloadNode>(*workload.get());
+        wkl->shash = recalc_hash;
+        workload = Workload(wkl);
+      }
       n->workloads2idx_.emplace(workload, i);
       workloads.push_back(workload);
     }
@@ -196,7 +197,7 @@ Database Database::JSONDatabase(String path_workload, String path_tuning_record,
           } catch (std::runtime_error& e) {
             LOG(FATAL) << "ValueError: Unable to parse TuningRecord, on line " << (task_id + 1)
                        << " of file " << path_tuning_record << ". The workload is:\n"
-                       << (workload.defined() ? tir::AsTVMScript(workload->mod) : "(null)")
+                       << (workload.defined() ? workload->mod->Script() : "(null)")
                        << "\nThe JSONObject of TuningRecord is:\n"
                        << json_obj << "\nThe error message is:\n"
                        << e.what();

@@ -74,9 +74,9 @@ class TestTIRMatmul(BaseBeforeAfter):
     """
 
     def before(
-        A: T.Buffer[(16, 16), "float32"],
-        B: T.Buffer[(16, 16), "float32"],
-        C: T.Buffer[(16, 16), "float32"],
+        A: T.Buffer((16, 16), "float32"),
+        B: T.Buffer((16, 16), "float32"),
+        C: T.Buffer((16, 16), "float32"),
     ) -> None:
         T.func_attr({"layout_free_buffers": [1]})
         for i0, j, k0, i1, k1 in T.grid(4, 16, 4, 4, 4):
@@ -89,9 +89,9 @@ class TestTIRMatmul(BaseBeforeAfter):
                 C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
 
     def expected(
-        A: T.Buffer[(16, 16), "float32"],
-        B: T.Buffer[(16, 16), "float32"],
-        C: T.Buffer[(16, 16), "float32"],
+        A: T.Buffer((16, 16), "float32"),
+        B: T.Buffer((16, 16), "float32"),
+        C: T.Buffer((16, 16), "float32"),
     ) -> None:
         T.func_attr({"layout_free_buffers": [1]})
         B_reindex = T.alloc_buffer([16, 4, 4], dtype="float32")
@@ -114,7 +114,7 @@ class TestRewrittenBuffersMustOccurWithinBlock(BaseBeforeAfter):
     """Buffers must occur within a Block"""
 
     def before(
-        A: T.Buffer[(16, 16), "float32"],
+        A: T.Buffer((16, 16), "float32"),
     ) -> None:
         T.func_attr({"layout_free_buffers": [0]})
         for i, j in T.grid(16, 16):
@@ -131,7 +131,7 @@ class TestExtentOne(BaseBeforeAfter):
     """
 
     def before(
-        A: T.Buffer[(16, 1), "float32"],
+        A: T.Buffer((16, 1), "float32"),
     ) -> None:
         T.func_attr({"layout_free_buffers": [0]})
         for i, j in T.grid(16, 1):
@@ -139,7 +139,7 @@ class TestExtentOne(BaseBeforeAfter):
                 vi, vj = T.axis.remap("SS", [i, j])
                 T.evaluate(A[vi, vj])
 
-    def expected(A: T.Buffer[(16, 1), "float32"]):
+    def expected(A: T.Buffer((16, 1), "float32")):
         T.func_attr({"layout_free_buffers": [0]})
 
         A_global = T.alloc_buffer([16], dtype="float32")
@@ -157,9 +157,9 @@ class TestExtentOne(BaseBeforeAfter):
 
 @T.prim_func
 def tir_matmul(
-    A: T.Buffer[(16, 16), "float32"],
-    B: T.Buffer[(16, 16), "float32"],
-    C: T.Buffer[(16, 16), "float32"],
+    A: T.Buffer((16, 16), "float32"),
+    B: T.Buffer((16, 16), "float32"),
+    C: T.Buffer((16, 16), "float32"),
 ) -> None:
     T.func_attr({"layout_free_buffers": [1]})
     for i0, j, k0, i1, k1 in T.grid(4, 16, 4, 4, 4):
@@ -174,9 +174,9 @@ def tir_matmul(
 
 @T.prim_func
 def rewritten_tir_matmul(
-    A: T.Buffer[(16, 16), "float32"],
-    B: T.Buffer[(16, 16), "float32"],
-    C: T.Buffer[(16, 16), "float32"],
+    A: T.Buffer((16, 16), "float32"),
+    B: T.Buffer((16, 16), "float32"),
+    C: T.Buffer((16, 16), "float32"),
 ) -> None:
     T.func_attr({"layout_free_buffers": [1]})
     B_reindex = T.alloc_buffer([16, 4, 4], dtype="float32")
@@ -208,7 +208,7 @@ def test_layout_rewrite():
 @tvm.script.ir_module
 class Conv2dCacheRead:
     @T.prim_func
-    def main(p0: T.Buffer[(1, 56, 56, 64), "float32"], p1: T.Buffer[(3, 3, 64, 64), "float32"], conv2d_nhwc: T.Buffer[(1, 56, 56, 64), "float32"]):
+    def main(p0: T.Buffer((1, 56, 56, 64), "float32"), p1: T.Buffer((3, 3, 64, 64), "float32"), conv2d_nhwc: T.Buffer((1, 56, 56, 64), "float32")):
         T.func_attr({"layout_free_buffers": [1], "tir.noalias": True, "global_symbol": "main"})
         pad_temp = T.alloc_buffer([1, 58, 58, 64], dtype="float32")
         conv2d_nhwc_global = T.alloc_buffer([1, 56, 56, 64], dtype="float32")
@@ -248,7 +248,7 @@ class Conv2dCacheRead:
                     for i0_2_init, i1_2_init, i2_2_init, i3_2_init, i0_3_init, i1_3_init, i2_3_init in T.grid(1, 1, 14, 2, 1, 4, 1):
                         for i3_3_fused_init in T.vectorized(2):
                             with T.block("conv2d_nhwc_init"):
-                                nn = T.axis.spatial(1, i0_2_init + i0_3_init + i0_1)
+                                nn = T.axis.spatial(1, i0_1 + i0_2_init + i0_3_init)
                                 yy = T.axis.spatial(56, i0_0_i1_0_i2_0_fused // 2 * 28 + i1_1 * 4 + i1_2_init * 4 + i1_3_init)
                                 xx = T.axis.spatial(56, i2_3_init + i0_0_i1_0_i2_0_fused % 2 * 28 + i2_1 * 14 + i2_2_init)
                                 ff = T.axis.spatial(64, i3_0 * 4 + i3_1 * 4 + i3_2_init * 2 + i3_3_fused_init)
@@ -259,7 +259,7 @@ class Conv2dCacheRead:
                     for i4_0, i5_0, i6_0, i0_2, i1_2, i2_2, i3_2, i4_1, i5_1, i6_1, i0_3, i1_3, i2_3 in T.grid(1, 1, 2, 1, 1, 14, 2, 3, 3, 32, 1, 4, 1):
                         for i3_3_fused in T.vectorized(2):
                             with T.block("conv2d_nhwc_update"):
-                                nn = T.axis.spatial(1, i0_2 + i0_3 + i0_1)
+                                nn = T.axis.spatial(1, i0_1 + i0_2 + i0_3)
                                 yy = T.axis.spatial(56, i0_0_i1_0_i2_0_fused // 2 * 28 + i1_1 * 4 + i1_2 * 4 + i1_3)
                                 xx = T.axis.spatial(56, i2_3 + i0_0_i1_0_i2_0_fused % 2 * 28 + i2_1 * 14 + i2_2)
                                 ff = T.axis.spatial(64, i3_0 * 4 + i3_1 * 4 + i3_2 * 2 + i3_3_fused)
@@ -285,7 +285,7 @@ class Conv2dCacheRead:
 @tvm.script.ir_module
 class Conv2dCacheReadRewritten:
     @T.prim_func
-    def main(p0: T.Buffer[(1, 56, 56, 64), "float32"], p1: T.Buffer[(3, 3, 64, 64), "float32"], conv2d_nhwc: T.Buffer[(1, 56, 56, 64), "float32"]):
+    def main(p0: T.Buffer((1, 56, 56, 64), "float32"), p1: T.Buffer((3, 3, 64, 64), "float32"), conv2d_nhwc: T.Buffer((1, 56, 56, 64), "float32")):
         T.func_attr({"layout_free_buffers": [1], "tir.noalias": True, "global_symbol": "main"})
         pad_temp = T.alloc_buffer([1, 58, 58, 64], dtype="float32")
         conv2d_nhwc_global = T.alloc_buffer([1, 56, 56, 64], dtype="float32")
@@ -333,7 +333,7 @@ class Conv2dCacheReadRewritten:
                     for i0_2_init, i1_2_init, i2_2_init, i3_2_init, i0_3_init, i1_3_init, i2_3_init in T.grid(1, 1, 14, 2, 1, 4, 1):
                         for i3_3_fused_init in T.vectorized(2):
                             with T.block("conv2d_nhwc_init"):
-                                nn = T.axis.spatial(1, i0_2_init + i0_3_init + i0_1)
+                                nn = T.axis.spatial(1, i0_1 + i0_2_init + i0_3_init)
                                 yy = T.axis.spatial(56, i0_0_i1_0_i2_0_fused // 2 * 28 + i1_1 * 4 + i1_2_init * 4 + i1_3_init)
                                 xx = T.axis.spatial(56, i2_3_init + i0_0_i1_0_i2_0_fused % 2 * 28 + i2_1 * 14 + i2_2_init)
                                 ff = T.axis.spatial(64, i3_0 * 4 + i3_1 * 4 + i3_2_init * 2 + i3_3_fused_init)
@@ -344,7 +344,7 @@ class Conv2dCacheReadRewritten:
                     for i4_0, i5_0, i6_0, i0_2, i1_2, i2_2, i3_2, i4_1, i5_1, i6_1, i0_3, i1_3, i2_3 in T.grid(1, 1, 2, 1, 1, 14, 2, 3, 3, 32, 1, 4, 1):
                         for i3_3_fused in T.vectorized(2):
                             with T.block("conv2d_nhwc_update"):
-                                nn = T.axis.spatial(1, i0_2 + i0_3 + i0_1)
+                                nn = T.axis.spatial(1, i0_1 + i0_2 + i0_3)
                                 yy = T.axis.spatial(56, i0_0_i1_0_i2_0_fused // 2 * 28 + i1_1 * 4 + i1_2 * 4 + i1_3)
                                 xx = T.axis.spatial(56, i2_3 + i0_0_i1_0_i2_0_fused % 2 * 28 + i2_1 * 14 + i2_2)
                                 ff = T.axis.spatial(64, i3_0 * 4 + i3_1 * 4 + i3_2 * 2 + i3_3_fused)
@@ -370,7 +370,7 @@ class Conv2dCacheReadRewritten:
 @tvm.script.ir_module
 class Conv2dCacheReadMultipleRewritten:
     @T.prim_func
-    def main(p0: T.Buffer[(1, 56, 56, 64), "float32"], p1: T.Buffer[(3, 3, 64, 64), "float32"], conv2d_nhwc: T.Buffer[(1, 56, 56, 64), "float32"]):
+    def main(p0: T.Buffer((1, 56, 56, 64), "float32"), p1: T.Buffer((3, 3, 64, 64), "float32"), conv2d_nhwc: T.Buffer((1, 56, 56, 64), "float32")):
         T.func_attr({"layout_free_buffers": [1], "tir.noalias": True, "global_symbol": "main"})
         pad_temp = T.alloc_buffer([1, 58, 58, 64], dtype="float32")
         conv2d_nhwc_global = T.alloc_buffer([1, 56, 56, 64], dtype="float32")
@@ -425,7 +425,7 @@ class Conv2dCacheReadMultipleRewritten:
                     for i0_2_init, i1_2_init, i2_2_init, i3_2_init, i0_3_init, i1_3_init, i2_3_init in T.grid(1, 1, 14, 2, 1, 4, 1):
                         for i3_3_fused_init in T.vectorized(2):
                             with T.block("conv2d_nhwc_init"):
-                                nn = T.axis.spatial(1, i0_2_init + i0_3_init + i0_1)
+                                nn = T.axis.spatial(1, i0_1 + i0_2_init + i0_3_init)
                                 yy = T.axis.spatial(56, i0_0_i1_0_i2_0_fused // 2 * 28 + i1_1 * 4 + i1_2_init * 4 + i1_3_init)
                                 xx = T.axis.spatial(56, i2_3_init + i0_0_i1_0_i2_0_fused % 2 * 28 + i2_1 * 14 + i2_2_init)
                                 ff = T.axis.spatial(64, i3_0 * 4 + i3_1 * 4 + i3_2_init * 2 + i3_3_fused_init)
@@ -436,7 +436,7 @@ class Conv2dCacheReadMultipleRewritten:
                     for i4_0, i5_0, i6_0, i0_2, i1_2, i2_2, i3_2, i4_1, i5_1, i6_1, i0_3, i1_3, i2_3 in T.grid(1, 1, 2, 1, 1, 14, 2, 3, 3, 32, 1, 4, 1):
                         for i3_3_fused in T.vectorized(2):
                             with T.block("conv2d_nhwc_update"):
-                                nn = T.axis.spatial(1, i0_2 + i0_3 + i0_1)
+                                nn = T.axis.spatial(1, i0_1 + i0_2 + i0_3)
                                 yy = T.axis.spatial(56, i0_0_i1_0_i2_0_fused // 2 * 28 + i1_1 * 4 + i1_2 * 4 + i1_3)
                                 xx = T.axis.spatial(56, i2_3 + i0_0_i1_0_i2_0_fused % 2 * 28 + i2_1 * 14 + i2_2)
                                 ff = T.axis.spatial(64, i3_0 * 4 + i3_1 * 4 + i3_2 * 2 + i3_3_fused)
@@ -482,9 +482,9 @@ def test_layout_rewrite_cache_read_multiple():
 
 class TestLayoutRewriteInt64Index(BaseBeforeAfter):
     def before(
-        p0: T.Buffer[(T.int64(12), T.int64(197), T.int64(64)), "int8"],
-        p1: T.Buffer[(T.int64(12), T.int64(197), T.int64(64)), "int8"],
-        T_batch_matmul_NT: T.Buffer[(T.int64(12), T.int64(197), T.int64(197)), "int32"],
+        p0: T.Buffer((T.int64(12), T.int64(197), T.int64(64)), "int8"),
+        p1: T.Buffer((T.int64(12), T.int64(197), T.int64(64)), "int8"),
+        T_batch_matmul_NT: T.Buffer((T.int64(12), T.int64(197), T.int64(197)), "int32"),
     ):
         T.func_attr({"layout_free_buffers": [1], "global_symbol": "main", "tir.noalias": True})
         for b_0_i_0_fused in T.parallel(T.int64(394)):
@@ -542,9 +542,9 @@ class TestLayoutRewriteInt64Index(BaseBeforeAfter):
                             )
 
     def expected(
-        p0: T.Buffer[(T.int64(12), T.int64(197), T.int64(64)), "int8"],
-        p1: T.Buffer[(T.int64(12), T.int64(197), T.int64(64)), "int8"],
-        T_batch_matmul_NT: T.Buffer[(T.int64(12), T.int64(197), T.int64(197)), "int32"],
+        p0: T.Buffer((T.int64(12), T.int64(197), T.int64(64)), "int8"),
+        p1: T.Buffer((T.int64(12), T.int64(197), T.int64(64)), "int8"),
+        T_batch_matmul_NT: T.Buffer((T.int64(12), T.int64(197), T.int64(197)), "int32"),
     ):
         T.func_attr({"tir.noalias": True, "global_symbol": "main", "layout_free_buffers": [1]})
         p1_global = T.alloc_buffer(
